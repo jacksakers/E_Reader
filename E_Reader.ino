@@ -23,7 +23,7 @@ SPIClass SD_SPI = SPIClass(HSPI);
 #define DISPLAY_HEIGHT EPD_H // 272 pixels
 #define FONT_WIDTH 8         // Character width for 16pt font
 #define FONT_HEIGHT 16       // Character height for 16pt font
-#define CHARS_PER_LINE (DISPLAY_WIDTH / FONT_WIDTH) // ~99 chars
+#define CHARS_PER_LINE 50    // Safe buffer size for EPD_ShowString
 #define LINES_PER_PAGE (DISPLAY_HEIGHT / FONT_HEIGHT) // ~17 lines
 
 // ==================== BUFFER & STATE ====================
@@ -39,6 +39,7 @@ std::vector<String> bookList;
 int selectedBook = 0;
 bool inFileBrowser = true;
 bool inReader = false;
+bool browserNeedsRefresh = true;  // Track if browser display needs updating
 
 // ==================== FUNCTION PROTOTYPES ====================
 void initializeSDCard();
@@ -96,8 +97,11 @@ void loop() {
   if (inFileBrowser) {
     fileBrowser();
   } else if (inReader) {
+    Serial.println("Entering displayPage...");
     displayPage();
+    Serial.println("displayPage completed, calling handleNavigation...");
     handleNavigation();
+    Serial.println("handleNavigation completed");
   }
 }
 
@@ -133,47 +137,56 @@ void displayBootScreen() {
 
 // ==================== FILE BROWSER ====================
 void fileBrowser() {
-  Paint_Clear(WHITE);
-  EPD_ShowString(0, 0, (char*)"SELECT BOOK", 16, BLACK);
-  EPD_ShowString(0, 20, (char*)"---", 16, BLACK);
+  // Serial.println("fileBrowser: Start");
   
-  File dir = SD.open(currentPath);
-  if (!dir) {
-    EPD_ShowString(0, 40, (char*)"No books folder", 16, BLACK);
+  // Only redraw if browser needs refresh
+  if (browserNeedsRefresh) {
+    Serial.println("fileBrowser: Refreshing display");
+    Paint_Clear(WHITE);
+    EPD_ShowString(0, 0, (char*)"SELECT BOOK", 16, BLACK);
+    EPD_ShowString(0, 20, (char*)"---", 16, BLACK);
+    
+    File dir = SD.open(currentPath);
+    if (!dir) {
+      EPD_ShowString(0, 40, (char*)"No books folder", 16, BLACK);
+      EPD_Display(ImageBW);
+      EPD_PartUpdate();
+      EPD_DeepSleep();
+      return;
+    }
+    
+    bookList.clear();
+    int lineY = 40;
+    int displayCount = 0;
+    
+    File file = dir.openNextFile();
+    while (file && displayCount < LINES_PER_PAGE - 2) {
+      if (!file.isDirectory()) {
+        String filename = file.name();
+        bookList.push_back(filename);
+        
+        // Highlight selected book
+        if (displayCount == selectedBook) {
+          EPD_ShowString(0, lineY, (char*)"> ", 16, BLACK);
+          EPD_ShowString(16, lineY, (char*)filename.c_str(), 16, BLACK);
+        } else {
+          EPD_ShowString(0, lineY, (char*)filename.c_str(), 16, BLACK);
+        }
+        
+        lineY += FONT_HEIGHT;
+        displayCount++;
+      }
+      file.close();
+      file = dir.openNextFile();
+    }
+    dir.close();
+    
     EPD_Display(ImageBW);
     EPD_PartUpdate();
-    EPD_DeepSleep();
-    return;
+    browserNeedsRefresh = false;
+    delay(200);  // Settle after display update
+    Serial.println("fileBrowser: Display refresh complete");
   }
-  
-  bookList.clear();
-  int lineY = 40;
-  int displayCount = 0;
-  
-  File file = dir.openNextFile();
-  while (file && displayCount < LINES_PER_PAGE - 2) {
-    if (!file.isDirectory()) {
-      String filename = file.name();
-      bookList.push_back(filename);
-      
-      // Highlight selected book
-      if (displayCount == selectedBook) {
-        EPD_ShowString(0, lineY, (char*)"> ", 16, BLACK);
-        EPD_ShowString(16, lineY, (char*)filename.c_str(), 16, BLACK);
-      } else {
-        EPD_ShowString(0, lineY, (char*)filename.c_str(), 16, BLACK);
-      }
-      
-      lineY += FONT_HEIGHT;
-      displayCount++;
-    }
-    file.close();
-    file = dir.openNextFile();
-  }
-  dir.close();
-  
-  EPD_Display(ImageBW);
-  EPD_PartUpdate();
   
   // Handle navigation in file browser
   if (digitalRead(NEXT_KEY) == 0) {
@@ -181,6 +194,7 @@ void fileBrowser() {
     if (digitalRead(NEXT_KEY) == 1) {
       if (selectedBook < (int)bookList.size() - 1) {
         selectedBook++;
+        browserNeedsRefresh = true;
       }
       Serial.println("Next book");
     }
@@ -189,6 +203,7 @@ void fileBrowser() {
     if (digitalRead(PRV_KEY) == 1) {
       if (selectedBook > 0) {
         selectedBook--;
+        browserNeedsRefresh = true;
       }
       Serial.println("Previous book");
     }
@@ -199,17 +214,20 @@ void fileBrowser() {
       if (selectedBook < (int)bookList.size()) {
         Serial.printf("Loading: %s\n", bookList[selectedBook].c_str());
         loadBook(bookList[selectedBook]);
+        Serial.println("loadBook completed, switching to reader mode");
         inFileBrowser = false;
         inReader = true;
         currentPage = 0;
         currentPos = 0;
+        Serial.println("State variables updated, returning from fileBrowser");
+        return;  // Exit immediately - don't continue fileBrowser execution
       } else {
         Serial.println("ERROR: selectedBook >= bookList.size()");
       }
     }
   }
   
-  delay(200);
+  delay(50);  // Small delay to prevent busy loop
 }
 
 // ==================== LOAD BOOK ====================
@@ -218,10 +236,13 @@ void loadBook(String filename) {
   
   // Free previous buffer
   if (fileBuffer != NULL) {
+    Serial.println("Freeing previous buffer...");
     free(fileBuffer);
+    fileBuffer = NULL;
   }
   
   String filepath = currentPath + filename;
+  Serial.printf("Opening file: %s\n", filepath.c_str());
   File file = SD.open(filepath);
   
   if (!file) {
@@ -230,33 +251,45 @@ void loadBook(String filename) {
   }
   
   fileSize = file.size();
+  Serial.printf("File opened, size: %d bytes\n", fileSize);
+  
+  Serial.println("About to allocate memory...");
   fileBuffer = (char*)malloc(fileSize + 1);
   
   if (fileBuffer == NULL) {
-    Serial.println("Not enough memory for file");
+    Serial.println("ERROR: Not enough memory for file");
     file.close();
     return;
   }
   
-  file.read((uint8_t*)fileBuffer, fileSize);
+  Serial.println("Memory allocated, reading file...");
+  size_t bytesRead = file.read((uint8_t*)fileBuffer, fileSize);
+  Serial.printf("Read %d bytes from file\n", bytesRead);
+  
   fileBuffer[fileSize] = '\0';
   file.close();
+  Serial.println("File closed");
   
   Serial.printf("Book loaded: %d bytes\n", fileSize);
   calculatePages();
+  Serial.println("Pages calculated");
 }
 
 // ==================== CALCULATE PAGES ====================
 void calculatePages() {
   // Simple calculation: count newlines and wrap text
   // For a full implementation, would need proper word wrapping
-  Serial.printf("File size: %d bytes\n", fileSize);
+  Serial.printf("calculatePages: File size: %d bytes\n", fileSize);
   currentPos = 0;
+  Serial.println("calculatePages: Complete");
 }
 
 // ==================== DISPLAY PAGE ====================
 void displayPage() {
+  Serial.println("displayPage: Start");
+  
   if (fileBuffer == NULL || fileSize == 0) {
+    Serial.println("displayPage: No file loaded, displaying error");
     Paint_Clear(WHITE);
     EPD_ShowString(0, 0, (char*)"No file loaded", 16, BLACK);
     EPD_Display(ImageBW);
@@ -264,9 +297,11 @@ void displayPage() {
     return;
   }
   
+  Serial.println("displayPage: Clearing paint");
   Paint_Clear(WHITE);
   
   // Display title
+  Serial.println("displayPage: Showing title");
   EPD_ShowString(0, 0, (char*)"PAGE", 16, BLACK);
   
   // Extract and display text from current position
@@ -274,50 +309,76 @@ void displayPage() {
   int lineCount = 0;
   size_t pos = currentPos;
   
+  Serial.printf("displayPage: Starting text rendering at position %d\n", currentPos);
+  Serial.printf("displayPage: fileBuffer address: %p\n", fileBuffer);
+  Serial.printf("displayPage: fileSize: %d\n", fileSize);
+  Serial.printf("displayPage: CHARS_PER_LINE: %d, LINES_PER_PAGE: %d\n", CHARS_PER_LINE, LINES_PER_PAGE);
+  
+  int loopCount = 0;
   while (lineCount < LINES_PER_PAGE - 2 && pos < fileSize) {
-    // Extract one line of text
-    char lineBuffer[CHARS_PER_LINE + 1];
+    loopCount++;
+    Serial.printf("displayPage: Loop %d, lineCount=%d, pos=%d\n", loopCount, lineCount, pos);
+    
+    // Extract one line of text - use stack-allocated buffer
+    char lineBuffer[51];  // 50 chars + null terminator
     int charCount = 0;
     
-    // Handle word wrapping and line breaks
+    Serial.println("displayPage: About to read line");
+    
+    // Handle word wrapping and line breaks - use CHARS_PER_LINE define
     while (charCount < CHARS_PER_LINE && pos < fileSize && fileBuffer[pos] != '\n') {
       lineBuffer[charCount] = fileBuffer[pos];
       charCount++;
       pos++;
     }
     
+    Serial.printf("displayPage: Read %d chars\n", charCount);
+    
     // Skip newline character
     if (pos < fileSize && fileBuffer[pos] == '\n') {
       pos++;
     }
     
-    lineBuffer[charCount] = '\0';
+    lineBuffer[charCount] = '\0';  // Always null-terminate
     
     if (charCount > 0) {
+      // Display the line only if it contains valid characters
+      Serial.printf("displayPage: Calling EPD_ShowString with %d chars\n", charCount);
       EPD_ShowString(0, lineY, lineBuffer, 16, BLACK);
+      Serial.println("displayPage: EPD_ShowString completed");
       lineY += FONT_HEIGHT;
       lineCount++;
     } else {
-      // Empty line
+      // Empty line - still count it
       lineY += FONT_HEIGHT;
       lineCount++;
+      // Skip any carriage returns
       if (pos < fileSize && fileBuffer[pos] == '\r') {
         pos++;
       }
     }
   }
   
+  Serial.printf("displayPage: Rendered %d lines\n", lineCount);
+  
   // Display page info
   char pageInfo[50];
-  sprintf(pageInfo, "Page %d - Pos: %d/%d", currentPage, (int)currentPos, (int)fileSize);
+  int infoLen = sprintf(pageInfo, "Page %d - Pos: %d/%d", currentPage, (int)currentPos, (int)fileSize);
+  pageInfo[infoLen] = '\0';  // Ensure null-termination
+  Serial.println("displayPage: Showing page info");
   EPD_ShowString(0, DISPLAY_HEIGHT - FONT_HEIGHT - 5, pageInfo, 16, BLACK);
   
+  Serial.println("displayPage: Calling EPD_Display");
   EPD_Display(ImageBW);
+  Serial.println("displayPage: Calling EPD_PartUpdate");
   EPD_PartUpdate();
+  Serial.println("displayPage: Complete");
 }
 
 // ==================== HANDLE NAVIGATION ====================
 void handleNavigation() {
+  Serial.println("handleNavigation: Start");
+  
   // Next page - scroll down
   if (digitalRead(NEXT_KEY) == 0) {
     delay(100);
@@ -344,6 +405,7 @@ void handleNavigation() {
       }
       inReader = false;
       inFileBrowser = true;
+      browserNeedsRefresh = true;
       currentPage = 0;
       currentPos = 0;
       Serial.println("Exit to file browser");
@@ -360,6 +422,7 @@ void handleNavigation() {
   }
   
   delay(200);
+  Serial.println("handleNavigation: Complete");
 }
 
 // ==================== PAGE DOWN ====================
