@@ -505,27 +505,44 @@ bool eReaderLoadBook(const String& filename) {
   Serial.printf("[EREADER] File opened. Size: %d bytes\n", fileSize);
   Serial.flush();
   
-  // Check if file fits in memory
+  // Check if file fits in memory (use PSRAM for large files)
   size_t availableHeap = ESP.getFreeHeap();
-  Serial.printf("[EREADER] Available heap: %d bytes\n", availableHeap);
+  size_t availablePSRAM = ESP.getFreePsram();
+  Serial.printf("[EREADER] Available heap: %d bytes, PSRAM: %d bytes\n", availableHeap, availablePSRAM);
   
-  if (fileSize > 500000) {  // 500KB limit for safety
-    Serial.printf("[EREADER] ERROR: File too large (%d bytes, limit 500KB)\n", fileSize);
+  // Limit: 5MB for books (plenty of room in 8MB PSRAM)
+  if (fileSize > 5000000) {
+    Serial.printf("[EREADER] ERROR: File too large (%d bytes, limit 5MB)\n", fileSize);
     file.close();
     return false;
   }
   
-  if (fileSize + 50000 > availableHeap) {  // Need at least 50KB buffer
-    Serial.printf("[EREADER] ERROR: Not enough heap (need %d, have %d)\n", fileSize + 50000, availableHeap);
-    file.close();
-    return false;
+  // For files > 200KB, use PSRAM; otherwise use heap
+  bool usePSRAM = (fileSize > 200000);
+  
+  if (usePSRAM) {
+    if (fileSize + 100000 > availablePSRAM) {
+      Serial.printf("[EREADER] ERROR: Not enough PSRAM (need %d, have %d)\n", fileSize + 100000, availablePSRAM);
+      file.close();
+      return false;
+    }
+  } else {
+    if (fileSize + 50000 > availableHeap) {
+      Serial.printf("[EREADER] ERROR: Not enough heap (need %d, have %d)\n", fileSize + 50000, availableHeap);
+      file.close();
+      return false;
+    }
   }
   
-  // Allocate memory
-  Serial.printf("[EREADER] Allocating %d bytes...\n", fileSize + 1);
+  // Allocate memory from PSRAM for large files
+  Serial.printf("[EREADER] Allocating %d bytes from %s...\n", fileSize + 1, usePSRAM ? "PSRAM" : "heap");
   Serial.flush();
   
-  fileBuffer = (char*)malloc(fileSize + 1);
+  if (usePSRAM) {
+    fileBuffer = (char*)ps_malloc(fileSize + 1);
+  } else {
+    fileBuffer = (char*)malloc(fileSize + 1);
+  }
   if (fileBuffer == NULL) {
     Serial.println("[EREADER] ERROR: malloc() failed");
     Serial.flush();
@@ -534,7 +551,7 @@ bool eReaderLoadBook(const String& filename) {
   }
   
   Serial.printf("[EREADER] Buffer allocated at %p\n", fileBuffer);
-  Serial.printf("[EREADER] Free heap after malloc: %d bytes\n", ESP.getFreeHeap());
+  Serial.printf("[EREADER] Free heap: %d bytes, PSRAM: %d bytes\n", ESP.getFreeHeap(), ESP.getFreePsram());
   Serial.flush();
   
   // Read file
@@ -769,6 +786,7 @@ void eReaderCleanup() {
   Serial.println("[EREADER] Cleaning up...");
   
   if (fileBuffer != NULL) {
+    // ps_malloc and malloc both use free() for deallocation
     free(fileBuffer);
     fileBuffer = NULL;
   }
