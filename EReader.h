@@ -6,18 +6,13 @@
 #include <vector>
 
 // ==================== E-READER CONFIGURATION ====================
-// NOTE: Display is 792x272 pixels (landscape) but with Rotation 180:
-//   - Paint.width = 272 (vertical axis in rotated coordinates)
-//   - Paint.height = 800 (horizontal axis in rotated coordinates)
-// Therefore: X coordinates must stay within 0-271, Y within 0-799
-
-#define EREADER_CHARS_PER_LINE 32     // Max chars per line: 272px / 8px per char = 34, use 32 for safety
-#define EREADER_LINES_PER_PAGE 42     // Lines per page: (800 - margins) / line_height
-#define EREADER_LINE_HEIGHT 16        // Font height (16px for size 16 font)
-#define EREADER_TOP_MARGIN 50         // Space for header
-#define EREADER_BOTTOM_MARGIN 50      // Space for footer
+#define EREADER_CHARS_PER_LINE 98     // Slightly less than 99 for margin
+#define EREADER_LINES_PER_PAGE 11     // Reduced to fit within display bounds (was 13)
+#define EREADER_LINE_HEIGHT 18        // Slightly more spacing for readability
+#define EREADER_TOP_MARGIN 45         // Space for header
+#define EREADER_BOTTOM_MARGIN 30      // Space for footer
 #define EREADER_LEFT_MARGIN 10        // Left text margin
-#define EREADER_MAX_Y 750             // Maximum Y coordinate for text (800 - BOTTOM_MARGIN)
+#define EREADER_MAX_Y 242             // Maximum Y coordinate for text (272 - BOTTOM_MARGIN)
 
 // Reference to global display buffer from OS_Main.ino
 extern uint8_t ImageBW[27200];
@@ -123,7 +118,18 @@ void eReaderBuildLineIndex() {
     
     pos = lineEnd;
     
-    // Only add next line if we're not at the end and position has advanced
+    // Skip multiple consecutive newlines but preserve one
+    while (pos < fileSize && (fileBuffer[pos] == '\r' || fileBuffer[pos] == '\n')) {
+      if (fileBuffer[pos] == '\n') {
+        lineStarts.push_back(pos + 1);  // Empty line
+        linesProcessed++;
+      }
+      pos++;
+      if (fileBuffer[pos - 1] == '\n' && pos < fileSize && fileBuffer[pos] != '\n') {
+        break;  // Stop after first newline if next char isn't newline
+      }
+    }
+    
     if (pos < fileSize && pos > lineStarts.back()) {
       lineStarts.push_back(pos);
       linesProcessed++;
@@ -135,14 +141,6 @@ void eReaderBuildLineIndex() {
   }
   
   totalLines = lineStarts.size();
-  
-  // Validate consistency
-  if (totalLines != lineStarts.size()) {
-    Serial.printf("[EREADER] ERROR: Line count mismatch! totalLines=%d, lineStarts.size()=%d\n", 
-                  totalLines, lineStarts.size());
-    totalLines = lineStarts.size();  // Force sync
-  }
-  
   Serial.printf("[EREADER] Built line index: %d lines\n", totalLines);
   Serial.printf("[EREADER] Free heap after index: %d bytes\n", ESP.getFreeHeap());
   Serial.flush();
@@ -168,8 +166,7 @@ int eReaderGetLineToBuffer(int lineNumber, char* buffer, int maxLen) {
   }
   
   size_t start = lineStarts[lineNumber];
-  // CRITICAL FIX: Check against lineStarts.size(), not totalLines, to avoid vector out-of-bounds
-  size_t end = ((size_t)(lineNumber + 1) < lineStarts.size()) ? lineStarts[lineNumber + 1] : fileSize;
+  size_t end = (lineNumber + 1 < totalLines) ? lineStarts[lineNumber + 1] : fileSize;
   
   // Validate bounds
   if (start >= fileSize || end > fileSize || start > end) {
@@ -181,8 +178,10 @@ int eReaderGetLineToBuffer(int lineNumber, char* buffer, int maxLen) {
   for (size_t i = start; i < end && i < fileSize && copied < (maxLen - 1); i++) {
     char c = fileBuffer[i];
     if (c == '\n' || c == '\r') break;
-    // Skip non-printable characters except space
-    if ((c >= 32 && c <= 126) || c == '\t') {
+    // Convert tabs to spaces
+    if (c == '\t') c = ' ';
+    // Only allow printable ASCII characters
+    if (c >= 32 && c <= 126) {
       buffer[copied++] = c;
     }
   }
@@ -194,44 +193,58 @@ int eReaderGetLineToBuffer(int lineNumber, char* buffer, int maxLen) {
 // ==================== UI RENDERING ====================
 
 void eReaderDrawHeader(const char* title, int progress) {
-  // With Rotation 180: X is 0-271, Y is 0-799
-  // Header is at top: Y near 0
+  // Top border
+  EPD_DrawLine(0, 0, 792, 0, BLACK);
+  EPD_DrawLine(0, 35, 792, 35, BLACK);
   
-  // Top border line (horizontal)
-  EPD_DrawLine(0, 35, 271, 35, BLACK);
-  
-  // Title - shortened to fit width
+  // Title - make a safe copy first
   if (title != NULL && strlen(title) > 0) {
-    char titleBuf[20];  // 20 chars max at 8px/char = 160px
-    strncpy(titleBuf, title, 19);
-    titleBuf[19] = '\0';
-    EPD_ShowString(EREADER_LEFT_MARGIN, 10, titleBuf, 16, BLACK);
+    char titleBuf[60];
+    strncpy(titleBuf, title, 59);
+    titleBuf[59] = '\0';
+    EPD_ShowString(EREADER_LEFT_MARGIN, 8, titleBuf, 16, BLACK);
   }
   
-  // Progress percentage on same line as title
+  // Progress bar
+  int barWidth = 200;
+  int barX = 550;
+  int barY = 12;
+  int barHeight = 12;
+  
+  // Progress bar background
+  EPD_DrawRectangle(barX, barY, barX + barWidth, barY + barHeight, BLACK, 0);
+  
+  // Progress bar fill
+  int fillWidth = (barWidth - 4) * progress / 100;
+  if (fillWidth > 0) {
+    for (int y = barY + 2; y < barY + barHeight - 2; y++) {
+      EPD_DrawLine(barX + 2, y, barX + 2 + fillWidth, y, BLACK);
+    }
+  }
+  
+  // Progress text
   char progressText[10];
   sprintf(progressText, "%d%%", progress);
-  EPD_ShowString(200, 10, progressText, 16, BLACK);
+  EPD_ShowString(barX + barWidth + 10, barY, progressText, 16, BLACK);
 }
 
 void eReaderDrawFooter(int currentPage, int totalPages, const char* controls) {
-  // Footer is at bottom: Y near 800
-  int footerY = 800 - EREADER_BOTTOM_MARGIN + 10;
+  int footerY = 272 - EREADER_BOTTOM_MARGIN + 5;
   
-  // Bottom border line
-  EPD_DrawLine(0, footerY - 5, 271, footerY - 5, BLACK);
+  // Bottom border
+  EPD_DrawLine(0, 272 - EREADER_BOTTOM_MARGIN, 792, 272 - EREADER_BOTTOM_MARGIN, BLACK);
   
   // Page numbers
-  char pageText[20];
-  sprintf(pageText, "Pg %d/%d", currentPage, totalPages);
+  char pageText[50];
+  sprintf(pageText, "Page %d / %d", currentPage, totalPages);
   EPD_ShowString(EREADER_LEFT_MARGIN, footerY, pageText, 16, BLACK);
   
-  // Simplified controls hint 
+  // Controls hint - make safe copy
   if (controls != NULL) {
-    char controlsBuf[15];
-    strncpy(controlsBuf, "EXIT=Menu", 14);
-    controlsBuf[14] = '\0';
-    EPD_ShowString(150, footerY, controlsBuf, 16, BLACK);
+    char controlsBuf[80];
+    strncpy(controlsBuf, controls, 79);
+    controlsBuf[79] = '\0';
+    EPD_ShowString(300, footerY, controlsBuf, 16, BLACK);
   }
 }
 
@@ -284,22 +297,16 @@ void eReaderDisplayPage() {
   Serial.println("[EREADER] Drawing text content...");
   Serial.printf("[EREADER] totalLines=%d, currentLine=%d, LINES_PER_PAGE=%d\n", 
                 totalLines, currentLine, EREADER_LINES_PER_PAGE);
-  Serial.printf("[EREADER] Y range: %d to %d (max safe: %d) | X range: %d to %d\n", 
-                EREADER_TOP_MARGIN, EREADER_MAX_Y, EREADER_MAX_Y, EREADER_LEFT_MARGIN, 271);
+  Serial.printf("[EREADER] Y range: %d to %d (max safe: %d)\n", 
+                EREADER_TOP_MARGIN, EREADER_MAX_Y, EREADER_MAX_Y);
   Serial.flush();
   
   // Validate state before drawing
   if (lineStarts.size() != totalLines) {
     Serial.printf("[EREADER] ERROR: lineStarts size mismatch! size=%d totalLines=%d\n", 
                   lineStarts.size(), totalLines);
-    // Force sync to prevent crash
-    totalLines = lineStarts.size();
-  }
-  
-  if (lineStarts.empty() || totalLines == 0) {
-    Serial.println("[EREADER] ERROR: No lines in index");
     Paint_Clear(WHITE);
-    EPD_ShowString(EREADER_LEFT_MARGIN, EREADER_TOP_MARGIN + 30, (char*)"ERROR: Empty line index", 16, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN, EREADER_TOP_MARGIN + 30, (char*)"ERROR: Corrupt line index", 16, BLACK);
     EPD_Display(ImageBW);
     EPD_PartUpdate();
     return;
@@ -308,41 +315,25 @@ void eReaderDisplayPage() {
   int yPos = EREADER_TOP_MARGIN;
   int linesDisplayed = 0;
   
-  // Pre-allocate line buffer outside loop and zero it completely
+  // Pre-allocate line buffer outside loop and zero it
   char lineBuf[EREADER_CHARS_PER_LINE + 1];
+  memset(lineBuf, 0, sizeof(lineBuf));
   
   Serial.println("[EREADER] Drawing lines...");
   Serial.flush();
   
   for (int i = 0; i < EREADER_LINES_PER_PAGE && (currentLine + i) < totalLines; i++) {
-    int targetLine = currentLine + i;
-    
-    // Additional safety check to prevent vector out-of-bounds
-    if (targetLine >= lineStarts.size()) {
-      Serial.printf("[EREADER] WARNING: Line %d exceeds lineStarts size %d, stopping\n", 
-                    targetLine, lineStarts.size());
+    // Check if yPos is within safe bounds (accounting for font height)
+    if (yPos + 16 > EREADER_MAX_Y) {
+      Serial.printf("[EREADER] WARNING: Line %d at y=%d would exceed bounds, stopping\n", currentLine + i, yPos);
       break;
     }
-    
-    // Check if yPos is within safe bounds BEFORE attempting to draw
-    // Ensure there's enough room for a 16-pixel high font
-    if (yPos < EREADER_TOP_MARGIN || yPos > (EREADER_MAX_Y - 16)) {
-      Serial.printf("[EREADER] WARNING: Line %d at y=%d out of safe range [%d-%d], stopping\n", 
-                    targetLine, yPos, EREADER_TOP_MARGIN, EREADER_MAX_Y - 16);
-      break;
-    }
-    
-    // Clear buffer for this line
-    memset(lineBuf, 0, sizeof(lineBuf));
     
     // Get line directly into buffer (no String operations)
-    int lineLen = eReaderGetLineToBuffer(targetLine, lineBuf, EREADER_CHARS_PER_LINE + 1);
+    int lineLen = eReaderGetLineToBuffer(currentLine + i, lineBuf, EREADER_CHARS_PER_LINE + 1);
     
     if (lineLen > 0) {
-      // Extra safety: validate x position is also within bounds
-      if (EREADER_LEFT_MARGIN >= 0 && EREADER_LEFT_MARGIN < 780) {
-        EPD_ShowString(EREADER_LEFT_MARGIN, yPos, lineBuf, 16, BLACK);
-      }
+      EPD_ShowString(EREADER_LEFT_MARGIN, yPos, lineBuf, 16, BLACK);
     }
     
     yPos += EREADER_LINE_HEIGHT;
@@ -380,17 +371,19 @@ void eReaderDisplayBrowser() {
   
   Paint_Clear(WHITE);
   
-  // Header (with correct rotated dimensions: X=0-271, Y=0-799)
-  EPD_DrawLine(0, 35, 271, 35, BLACK);
-  char* headerText = (char*)"E-READER";
-  EPD_ShowString(EREADER_LEFT_MARGIN, 10, headerText, 16, BLACK);
+  // Header
+  EPD_DrawLine(0, 0, 792, 0, BLACK);
+  EPD_DrawLine(0, 35, 792, 35, BLACK);
+  EPD_ShowString(EREADER_LEFT_MARGIN, 8, (char*)"E-READER - SELECT BOOK", 16, BLACK);
   
   // Check for books folder
   File dir = SD.open(booksPath);
   if (!dir) {
-    EPD_ShowString(EREADER_LEFT_MARGIN, 100, (char*)"ERROR: No /books/", 16, BLACK);
-    EPD_ShowString(EREADER_LEFT_MARGIN, 130, (char*)"folder found", 16, BLACK);
-    EPD_ShowString(EREADER_LEFT_MARGIN, 700, (char*)"EXIT: Home", 16, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN, 60, (char*)"ERROR: /books/ folder not found", 16, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN, 90, (char*)"Please create /books/ on SD card", 16, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN, 120, (char*)"Use Web Portal to upload books", 16, BLACK);
+    EPD_DrawLine(0, 240, 792, 240, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN, 248, (char*)"EXIT: Return to Home", 16, BLACK);
     EPD_Display(ImageBW);
     EPD_PartUpdate();
     return;
@@ -416,47 +409,53 @@ void eReaderDisplayBrowser() {
   std::sort(bookList.begin(), bookList.end());
   
   if (bookList.size() == 0) {
-    EPD_ShowString(EREADER_LEFT_MARGIN, 100, (char*)"No books found", 16, BLACK);
-    EPD_ShowString(EREADER_LEFT_MARGIN, 130, (char*)"Upload .txt", 16, BLACK);
-    EPD_ShowString(EREADER_LEFT_MARGIN, 700, (char*)"EXIT: Home", 16, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN, 60, (char*)"No books found in /books/", 16, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN, 90, (char*)"Upload .txt files via Web Portal", 16, BLACK);
+    EPD_DrawLine(0, 240, 792, 240, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN, 248, (char*)"EXIT: Return to Home", 16, BLACK);
     EPD_Display(ImageBW);
     EPD_PartUpdate();
     return;
   }
   
-  // Display books (scrolling support)
-  int maxVisible = 35;  // Books visible at once (more with taller display)
+  // Display books (with scrolling support)
+  int maxVisible = 11;  // Books visible at once
   int startIdx = browserScrollOffset;
-  int yPos = 60;
+  int yPos = 50;
   
   for (int i = 0; i < maxVisible && (startIdx + i) < bookList.size(); i++) {
     int bookIdx = startIdx + i;
     
-    // Check if we're running out of Y space
-    if (yPos + 18 > 700) break;
-    
     // Highlight selected book
     if (bookIdx == selectedBook) {
-      // Draw selection indicator
-      EPD_ShowString(EREADER_LEFT_MARGIN, yPos, (char*)">", 16, BLACK);
+      // Draw selection box
+      EPD_DrawRectangle(5, yPos - 2, 787, yPos + 16, BLACK, 0);
+      EPD_ShowString(EREADER_LEFT_MARGIN + 5, yPos, (char*)"> ", 16, BLACK);
     }
     
-    // Display filename (truncate if too long - max 30 chars at 8px/char)
+    // Display filename (truncate if too long)
     String displayName = bookList[bookIdx];
-    if (displayName.length() > 28) {
-      displayName = displayName.substring(0, 25) + "...";
+    if (displayName.length() > 90) {
+      displayName = displayName.substring(0, 87) + "...";
     }
     
-    EPD_ShowString(EREADER_LEFT_MARGIN + 16, yPos, (char*)displayName.c_str(), 16, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN + 25, yPos, (char*)displayName.c_str(), 16, BLACK);
     yPos += 18;
   }
   
-  // Footer
-  EPD_DrawLine(0, 755, 271, 755, BLACK);
-  char footer[30];
-  sprintf(footer, "%d books", bookList.size());
-  EPD_ShowString(EREADER_LEFT_MARGIN, 765, footer, 16, BLACK);
-  EPD_ShowString(150, 765, (char*)"OK=Open", 16, BLACK);
+  // Footer with instructions
+  EPD_DrawLine(0, 240, 792, 240, BLACK);
+  char footer[100];
+  sprintf(footer, "Books: %d | UP/DOWN: Select | OK: Open | EXIT: Home", bookList.size());
+  EPD_ShowString(EREADER_LEFT_MARGIN, 248, footer, 16, BLACK);
+  
+  // Scroll indicators
+  if (browserScrollOffset > 0) {
+    EPD_ShowString(750, 50, (char*)"^", 16, BLACK);
+  }
+  if (browserScrollOffset + maxVisible < bookList.size()) {
+    EPD_ShowString(750, 220, (char*)"v", 16, BLACK);
+  }
   
   EPD_Display(ImageBW);
   EPD_PartUpdate();

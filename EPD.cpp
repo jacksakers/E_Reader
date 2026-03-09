@@ -278,6 +278,10 @@ void EPD_ShowChar(uint16_t x,uint16_t y,uint16_t chr,uint16_t size1,uint16_t col
 	uint16_t i,m,temp,size2,chr1;
 	uint16_t x0,y0;
 	x0=x,y0=y;
+	
+	// CRITICAL: Only support printable ASCII (space to tilde)
+	if(chr < ' ' || chr > '~') return;
+	
 	if(size1==8)size2=6;
 	else size2=(size1/8+((size1%8)?1:0))*(size1/2);  //得到字体一个字符对应点阵集所占的字节数
 	chr1=chr-' ';  //计算偏移后的值
