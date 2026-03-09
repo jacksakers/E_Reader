@@ -68,11 +68,6 @@ void Paint_SetPixel(uint16_t Xpoint,uint16_t Ypoint,uint16_t Color)
 	uint16_t X, Y;
 	uint32_t Addr;
 	uint8_t Rdata;
-	
-	// CRITICAL: Bounds check input coordinates before transformation
-	if(Xpoint >= Paint.width || Ypoint >= Paint.height) {
-		return; // Out of bounds - silently ignore
-	}
 		
     switch(Paint.rotate) 
 		{
@@ -112,21 +107,10 @@ void Paint_SetPixel(uint16_t Xpoint,uint16_t Ypoint,uint16_t Color)
 				default:
 						return;
     }
-		
-		// CRITICAL: Bounds check after transformation
-		if(X >= Paint.widthMemory || Y >= Paint.heightMemory) {
-			return; // Transformed coordinates out of bounds
-		}
-		
-		Addr=X/8+Y*Paint.widthByte;
-		
-		// CRITICAL: Validate calculated address is within buffer
-		uint32_t maxAddr = (uint32_t)Paint.widthByte * Paint.heightMemory;
-		if(Addr >= maxAddr) {
-			return; // Address overflow - prevent crash
-		}
-		
+
+	Addr=X/8+Y*Paint.widthByte;
     Rdata=Paint.Image[Addr];
+	
     if(Color==BLACK)
     {    
 			Paint.Image[Addr]=Rdata&~(0x80>>(X % 8)); //将对应数据位置0
