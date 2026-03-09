@@ -5,6 +5,7 @@
 #include <WebServer.h>
 #include "WebPortal.h"
 #include "ButtonHandler.h"
+#include "EReader.h"
 
 // ==================== PIN DEFINITIONS ====================
 #define SCREEN_PWR 7         // Screen power pin
@@ -77,9 +78,6 @@ void returnToHome();
 
 // E-Reader mode functions
 void runEReaderMode();
-void eReaderInit();
-void eReaderLoop();
-void eReaderExit();
 
 // Other mode stubs
 void runDashboardMode();
@@ -312,236 +310,39 @@ void returnToHome() {
 }
 
 // ==================== E-READER MODE ====================
-// E-Reader state variables
-char* eReaderFileBuffer = NULL;
-size_t eReaderFileSize = 0;
-size_t eReaderCurrentPos = 0;
-int eReaderCurrentPage = 0;
-String eReaderCurrentPath = "/books/";
-std::vector<String> eReaderBookList;
-int eReaderSelectedBook = 0;
-bool eReaderInBrowser = true;
-bool eReaderBrowserNeedsRefresh = true;
-
-#define CHARS_PER_LINE 99
-#define LINES_PER_PAGE (DISPLAY_HEIGHT / FONT_HEIGHT)
-
-void eReaderInit() {
-  Serial.println("[E-READER] Initializing E-Reader mode...");
-  
-  eReaderInBrowser = true;
-  eReaderSelectedBook = 0;
-  eReaderBrowserNeedsRefresh = true;
-  eReaderCurrentPos = 0;
-  eReaderCurrentPage = 0;
-  
-  if (eReaderFileBuffer != NULL) {
-    free(eReaderFileBuffer);
-    eReaderFileBuffer = NULL;
-  }
-  
-  EPD_GPIOInit();
-  Paint_NewImage(ImageBW, DISPLAY_WIDTH, DISPLAY_HEIGHT, Rotation, WHITE);
-}
-
 void runEReaderMode() {
-  if (eReaderInBrowser) {
-    eReaderFileBrowser();
+  // Update E-Reader display if needed
+  eReaderUpdate();
+  
+  // Handle input based on current state
+  if (eReaderIsInBrowser()) {
+    // Browser navigation
+    eReaderHandleBrowserInput(
+      buttons->prv()->wasPressed(),
+      buttons->next()->wasPressed(),
+      buttons->ok()->wasPressed(),
+      buttons->exit()->wasPressed()
+    );
+    
+    // Exit to home
+    if (buttons->exit()->wasPressed()) {
+      eReaderCleanup();
+      returnToHome();
+    }
   } else {
-    eReaderDisplayPage();
-    eReaderHandleNavigation();
-  }
-}
-
-void eReaderFileBrowser() {
-  if (eReaderBrowserNeedsRefresh) {
-    Paint_Clear(WHITE);
-    EPD_ShowString(0, 0, (char*)"E-READER - SELECT BOOK", 16, BLACK);
-    EPD_ShowString(0, 20, (char*)"---", 16, BLACK);
+    // Reading navigation
+    eReaderHandleReaderInput(
+      buttons->prv()->wasPressed(),
+      buttons->next()->wasPressed(),
+      buttons->exit()->wasPressed(),
+      buttons->home()->wasPressed()
+    );
     
-    File dir = SD.open(eReaderCurrentPath);
-    if (!dir) {
-      EPD_ShowString(0, 40, (char*)"No /books/ folder", 16, BLACK);
-      EPD_ShowString(0, 60, (char*)"Press EXIT to return", 16, BLACK);
-      EPD_Display(ImageBW);
-      EPD_PartUpdate();
-      eReaderBrowserNeedsRefresh = false;
-    } else {
-      eReaderBookList.clear();
-      int lineY = 40;
-      int displayCount = 0;
-      
-      File file = dir.openNextFile();
-      while (file && displayCount < LINES_PER_PAGE - 3) {
-        if (!file.isDirectory()) {
-          String filename = file.name();
-          eReaderBookList.push_back(filename);
-          
-          if (displayCount == eReaderSelectedBook) {
-            EPD_ShowString(0, lineY, (char*)"> ", 16, BLACK);
-            EPD_ShowString(16, lineY, (char*)filename.c_str(), 16, BLACK);
-          } else {
-            EPD_ShowString(0, lineY, (char*)filename.c_str(), 16, BLACK);
-          }
-          
-          lineY += FONT_HEIGHT;
-          displayCount++;
-        }
-        file.close();
-        file = dir.openNextFile();
-      }
-      dir.close();
-      
-      EPD_ShowString(0, DISPLAY_HEIGHT - 16, (char*)"EXIT: Back to Home", 16, BLACK);
-      EPD_Display(ImageBW);
-      EPD_PartUpdate();
-      eReaderBrowserNeedsRefresh = false;
+    // Exit to home
+    if (buttons->home()->wasPressed()) {
+      eReaderCleanup();
+      returnToHome();
     }
-  }
-  
-  // Browser navigation
-  if (buttons->next()->wasPressed()) {
-    if (eReaderSelectedBook < (int)eReaderBookList.size() - 1) {
-      eReaderSelectedBook++;
-      eReaderBrowserNeedsRefresh = true;
-    }
-  } else if (buttons->prv()->wasPressed()) {
-    if (eReaderSelectedBook > 0) {
-      eReaderSelectedBook--;
-      eReaderBrowserNeedsRefresh = true;
-    }
-  } else if (buttons->ok()->wasPressed()) {
-    if (eReaderSelectedBook < (int)eReaderBookList.size()) {
-      eReaderLoadBook(eReaderBookList[eReaderSelectedBook]);
-      eReaderInBrowser = false;
-    }
-  } else if (buttons->exit()->wasPressed()) {
-    eReaderExit();
-    returnToHome();
-  }
-}
-
-void eReaderLoadBook(String filename) {
-  Serial.printf("[E-READER] Loading: %s\n", filename.c_str());
-  
-  if (eReaderFileBuffer != NULL) {
-    free(eReaderFileBuffer);
-    eReaderFileBuffer = NULL;
-  }
-  
-  String filepath = eReaderCurrentPath + filename;
-  File file = SD.open(filepath);
-  
-  if (!file) {
-    Serial.println("[E-READER] Failed to open file");
-    return;
-  }
-  
-  eReaderFileSize = file.size();
-  eReaderFileBuffer = (char*)malloc(eReaderFileSize + 1);
-  
-  if (eReaderFileBuffer == NULL) {
-    Serial.println("[E-READER] Not enough memory");
-    file.close();
-    return;
-  }
-  
-  file.read((uint8_t*)eReaderFileBuffer, eReaderFileSize);
-  eReaderFileBuffer[eReaderFileSize] = '\0';
-  file.close();
-  
-  eReaderCurrentPos = 0;
-  eReaderCurrentPage = 0;
-  
-  Serial.printf("[E-READER] Book loaded: %d bytes\n", eReaderFileSize);
-}
-
-void eReaderDisplayPage() {
-  Paint_Clear(WHITE);
-  
-  if (eReaderFileBuffer == NULL || eReaderFileSize == 0) {
-    EPD_ShowString(0, 0, (char*)"No file loaded", 16, BLACK);
-    EPD_Display(ImageBW);
-    EPD_PartUpdate();
-    return;
-  }
-  
-  // Display header
-  EPD_ShowString(0, 0, (char*)"E-READER", 16, BLACK);
-  EPD_DrawLine(0, 18, 792, 18, BLACK);
-  
-  // Display text
-  int lineY = 25;
-  int lineCount = 0;
-  size_t pos = eReaderCurrentPos;
-  
-  while (lineCount < LINES_PER_PAGE - 3 && pos < eReaderFileSize) {
-    char lineBuffer[100];
-    int charCount = 0;
-    
-    while (charCount < CHARS_PER_LINE && pos < eReaderFileSize && eReaderFileBuffer[pos] != '\n') {
-      lineBuffer[charCount] = eReaderFileBuffer[pos];
-      charCount++;
-      pos++;
-    }
-    
-    if (pos < eReaderFileSize && eReaderFileBuffer[pos] == '\n') {
-      pos++;
-    }
-    
-    lineBuffer[charCount] = '\0';
-    
-    if (charCount > 0) {
-      EPD_ShowString(0, lineY, lineBuffer, 16, BLACK);
-    }
-    
-    lineY += FONT_HEIGHT;
-    lineCount++;
-  }
-  
-  // Footer
-  char footer[100];
-  sprintf(footer, "Page %d | Pos: %d/%d | EXIT: Browser", 
-          eReaderCurrentPage, (int)eReaderCurrentPos, (int)eReaderFileSize);
-  EPD_ShowString(0, DISPLAY_HEIGHT - 16, footer, 16, BLACK);
-  
-  EPD_Display(ImageBW);
-  EPD_PartUpdate();
-}
-
-void eReaderHandleNavigation() {
-  if (buttons->next()->wasPressed()) {
-    // Page down
-    size_t pageJump = (LINES_PER_PAGE - 3) * CHARS_PER_LINE;
-    eReaderCurrentPos += pageJump;
-    if (eReaderCurrentPos > eReaderFileSize) {
-      eReaderCurrentPos = eReaderFileSize;
-    }
-    eReaderCurrentPage++;
-  } else if (buttons->prv()->wasPressed()) {
-    // Page up
-    size_t pageJump = (LINES_PER_PAGE - 3) * CHARS_PER_LINE;
-    if (eReaderCurrentPos > pageJump) {
-      eReaderCurrentPos -= pageJump;
-    } else {
-      eReaderCurrentPos = 0;
-    }
-    if (eReaderCurrentPage > 0) eReaderCurrentPage--;
-  } else if (buttons->exit()->wasPressed()) {
-    eReaderInBrowser = true;
-    eReaderBrowserNeedsRefresh = true;
-  } else if (buttons->home()->wasPressed()) {
-    // Return to home OS
-    eReaderExit();
-    returnToHome();
-  }
-}
-
-void eReaderExit() {
-  Serial.println("[E-READER] Exiting E-Reader mode");
-  if (eReaderFileBuffer != NULL) {
-    free(eReaderFileBuffer);
-    eReaderFileBuffer = NULL;
   }
 }
 
