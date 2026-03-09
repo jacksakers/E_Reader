@@ -10,6 +10,7 @@
 #define ARTFRAME_MAX_IMAGES 100        // Maximum number of art images to track
 #define ARTFRAME_DISPLAY_WIDTH 792     // Actual display width
 #define ARTFRAME_DISPLAY_HEIGHT 272    // Display height
+#define ARTFRAME_UI_TIMEOUT 3000       // Hide UI after 3 seconds of inactivity
 
 // Reference to global display buffer from OS_Main.ino
 extern uint8_t ImageBW[27200];
@@ -27,6 +28,8 @@ namespace ArtFrameNS {
   
   // UI state
   static bool needsRefresh = true;
+  static bool showUIOverlay = true;
+  static unsigned long lastInteractionTime = 0;
   static String statusMessage = "";
   static String artPath = "/art";
 }
@@ -161,35 +164,37 @@ void artFrameDrawScreen() {
     // Art is already loaded in ImageBW buffer from artFrameLoadAndDisplay
     // Just add UI overlay with minimal text
     
-    // Top bar with art info (semi-transparent effect by using rectangles)
-    EPD_DrawRectangle(0, 0, 791, 30, BLACK, 0);
-    EPD_DrawRectangle(0, 1, 791, 29, BLACK, 0);
-    
-    // Art counter
-    char infoText[50];
-    snprintf(infoText, sizeof(infoText), "%d / %d", currentArtIndex + 1, totalArtCount);
-    EPD_ShowString(10, 8, infoText, 16, BLACK);
-    
-    // Art filename (truncated)
-    String shortName = artFiles[currentArtIndex];
-    if (shortName.length() > 50) {
-      shortName = shortName.substring(0, 47) + "...";
+    if (showUIOverlay) {
+      // Top bar with art info (semi-transparent effect by using rectangles)
+      EPD_DrawRectangle(0, 0, 791, 30, BLACK, 0);
+      EPD_DrawRectangle(0, 1, 791, 29, BLACK, 0);
+      
+      // Art counter
+      char infoText[50];
+      snprintf(infoText, sizeof(infoText), "%d / %d", currentArtIndex + 1, totalArtCount);
+      EPD_ShowString(10, 8, infoText, 16, BLACK);
+      
+      // Art filename (truncated)
+      String shortName = artFiles[currentArtIndex];
+      if (shortName.length() > 50) {
+        shortName = shortName.substring(0, 47) + "...";
+      }
+      EPD_ShowString(150, 8, shortName.c_str(), 16, BLACK);
+      
+      // Bottom bar with controls
+      EPD_DrawRectangle(0, 242, 791, 271, BLACK, 0);
+      EPD_DrawRectangle(0, 243, 791, 270, BLACK, 0);
+      
+      EPD_ShowString(10, 248, "UP/DN: Navigate", 16, BLACK);
+      
+      if (autoCycleEnabled) {
+        EPD_ShowString(250, 248, "Auto-cycle: ON", 16, BLACK);
+      } else {
+        EPD_ShowString(250, 248, "Auto-cycle: OFF", 16, BLACK);
+      }
+      
+      EPD_ShowString(550, 248, "EXIT: Return", 16, BLACK);
     }
-    EPD_ShowString(150, 8, shortName.c_str(), 16, BLACK);
-    
-    // Bottom bar with controls
-    EPD_DrawRectangle(0, 242, 791, 271, BLACK, 0);
-    EPD_DrawRectangle(0, 243, 791, 270, BLACK, 0);
-    
-    EPD_ShowString(10, 248, "UP/DN: Navigate", 16, BLACK);
-    
-    if (autoCycleEnabled) {
-      EPD_ShowString(250, 248, "Auto-cycle: ON", 16, BLACK);
-    } else {
-      EPD_ShowString(250, 248, "Auto-cycle: OFF", 16, BLACK);
-    }
-    
-    EPD_ShowString(550, 248, "EXIT: Return", 16, BLACK);
   }
   
   // Display on e-ink
@@ -276,7 +281,9 @@ void artFrameInit() {
   
   // Initialize timing
   lastCycleTime = millis();
+  lastInteractionTime = millis();
   autoCycleEnabled = true;
+  showUIOverlay = true;
   needsRefresh = true;
   
   // Show initial display
@@ -291,6 +298,22 @@ void artFrameUpdate() {
   // Handle auto-cycling
   artFrameUpdateCycle();
   
+  // Check if UI should be hidden after timeout
+  unsigned long currentTime = millis();
+  if (showUIOverlay && totalArtCount > 0) {
+    // Handle timer overflow
+    if (currentTime < lastInteractionTime) {
+      lastInteractionTime = currentTime;
+    }
+    
+    // Hide UI after timeout
+    if (currentTime - lastInteractionTime >= ARTFRAME_UI_TIMEOUT) {
+      showUIOverlay = false;
+      needsRefresh = true;
+      Serial.println("[ARTFRAME] Hiding UI overlay");
+    }
+  }
+  
   // Redraw if needed
   if (needsRefresh) {
     artFrameDrawScreen();
@@ -299,6 +322,16 @@ void artFrameUpdate() {
 
 void artFrameHandleInput(bool upPressed, bool downPressed, bool okPressed, bool exitPressed) {
   using namespace ArtFrameNS;
+  
+  // Show UI on any button press
+  if (upPressed || downPressed || okPressed || exitPressed) {
+    if (!showUIOverlay) {
+      showUIOverlay = true;
+      needsRefresh = true;
+      Serial.println("[ARTFRAME] Showing UI overlay");
+    }
+    lastInteractionTime = millis();
+  }
   
   if (upPressed) {
     Serial.println("[ARTFRAME] Previous art");
