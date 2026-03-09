@@ -145,26 +145,55 @@ void eReaderBuildLineIndex() {
   Serial.flush();
 }
 
-// Get text for a specific line
-String eReaderGetLine(int lineNumber) {
+// Get text for a specific line - writes directly to buffer
+int eReaderGetLineToBuffer(int lineNumber, char* buffer, int maxLen) {
   using namespace EReaderNS;
   
-  if (lineNumber < 0 || lineNumber >= totalLines || fileBuffer == NULL) {
-    return "";
+  // Safety checks
+  if (buffer == NULL || maxLen <= 0) {
+    Serial.println("[EREADER] ERROR: Invalid buffer in getLine");
+    return 0;
+  }
+  
+  buffer[0] = '\0';  // Always ensure null termination
+  
+  if (lineNumber < 0 || lineNumber >= totalLines) {
+    Serial.printf("[EREADER] ERROR: Line %d out of range (0-%d)\n", lineNumber, totalLines-1);
+    return 0;
+  }
+  
+  if (fileBuffer == NULL) {
+    Serial.println("[EREADER] ERROR: fileBuffer is NULL");
+    return 0;
+  }
+  
+  if (lineNumber >= lineStarts.size()) {
+    Serial.printf("[EREADER] ERROR: lineStarts[%d] doesn't exist (size=%d)\n", lineNumber, lineStarts.size());
+    return 0;
   }
   
   size_t start = lineStarts[lineNumber];
   size_t end = (lineNumber + 1 < totalLines) ? lineStarts[lineNumber + 1] : fileSize;
   
-  // Build string from buffer
-  String line = "";
-  for (size_t i = start; i < end && i < fileSize; i++) {
-    char c = fileBuffer[i];
-    if (c == '\n' || c == '\r') break;
-    line += c;
+  // Validate bounds
+  if (start >= fileSize || end > fileSize || start > end) {
+    Serial.printf("[EREADER] ERROR: Invalid line bounds start=%d end=%d size=%d\n", start, end, fileSize);
+    return 0;
   }
   
-  return line;
+  // Copy directly to buffer
+  int copied = 0;
+  for (size_t i = start; i < end && i < fileSize && copied < (maxLen - 1); i++) {
+    char c = fileBuffer[i];
+    if (c == '\n' || c == '\r') break;
+    // Skip non-printable characters except space
+    if ((c >= 32 && c <= 126) || c == '\t') {
+      buffer[copied++] = c;
+    }
+  }
+  buffer[copied] = '\0';
+  
+  return copied;
 }
 
 // ==================== UI RENDERING ====================
@@ -270,24 +299,73 @@ void eReaderDisplayPage() {
   Serial.println("[EREADER] Header drawn");
   Serial.flush();
   
+  // Test draw to verify EPD functions work
+  Serial.println("[EREADER] Test drawing static string...");
+  Serial.flush();
+  char testStr[] = "TEST LINE 1234567890";
+  EPD_ShowString(EREADER_LEFT_MARGIN, EREADER_TOP_MARGIN, testStr, 16, BLACK);
+  Serial.println("[EREADER] Test draw complete - EPD functions work!");
+  Serial.flush();
+  delay(10);  // Small delay
+  
   // Draw text content
   Serial.println("[EREADER] Drawing text content...");
+  Serial.printf("[EREADER] totalLines=%d, currentLine=%d, lineStarts.size()=%d\n", 
+                totalLines, currentLine, lineStarts.size());
+  Serial.printf("[EREADER] fileBuffer=0x%p, fileSize=%d\n", fileBuffer, fileSize);
   Serial.flush();
+  
+  // Show first few bytes of file for debugging
+  Serial.print("[EREADER] First 50 bytes: ");
+  for (int i = 0; i < 50 && i < fileSize; i++) {
+    char c = fileBuffer[i];
+    if (c >= 32 && c <= 126) {
+      Serial.print(c);
+    } else {
+      Serial.printf("[%02X]", (uint8_t)c);
+    }
+  }
+  Serial.println();
+  Serial.flush();
+  
+  // Validate state before drawing
+  if (lineStarts.size() != totalLines) {
+    Serial.printf("[EREADER] ERROR: lineStarts size mismatch! size=%d totalLines=%d\n", 
+                  lineStarts.size(), totalLines);
+    EPD_ShowString(EREADER_LEFT_MARGIN, EREADER_TOP_MARGIN + 30, (char*)"ERROR: Corrupt line index", 16, BLACK);
+    EPD_Display(ImageBW);
+    EPD_PartUpdate();
+    return;
+  }
   
   int yPos = EREADER_TOP_MARGIN;
   int linesDisplayed = 0;
   
+  // Pre-allocate line buffer outside loop and zero it
+  char lineBuf[EREADER_CHARS_PER_LINE + 1];
+  memset(lineBuf, 0, sizeof(lineBuf));
+  
+  Serial.println("[EREADER] Starting line drawing loop...");
+  Serial.flush();
+  
   for (int i = 0; i < EREADER_LINES_PER_PAGE && (currentLine + i) < totalLines; i++) {
-    String line = eReaderGetLine(currentLine + i);
+    Serial.printf("[EREADER] Drawing line %d...\n", currentLine + i);
+    Serial.flush();
     
-    if (line.length() > 0) {
-      // Make a safe copy in a char buffer
-      char lineBuf[EREADER_CHARS_PER_LINE + 1];
-      int copyLen = min((int)line.length(), EREADER_CHARS_PER_LINE);
-      strncpy(lineBuf, line.c_str(), copyLen);
-      lineBuf[copyLen] = '\0';
+    // Get line directly into buffer (no String operations)
+    int lineLen = eReaderGetLineToBuffer(currentLine + i, lineBuf, EREADER_CHARS_PER_LINE + 1);
+    
+    Serial.printf("[EREADER] Line %d: length=%d\n", currentLine + i, lineLen);
+    Serial.flush();
+    
+    if (lineLen > 0) {
+      Serial.printf("[EREADER] Calling EPD_ShowString at y=%d...\n", yPos);
+      Serial.flush();
       
       EPD_ShowString(EREADER_LEFT_MARGIN, yPos, lineBuf, 16, BLACK);
+      
+      Serial.println("[EREADER] EPD_ShowString complete");
+      Serial.flush();
     }
     
     yPos += EREADER_LINE_HEIGHT;
