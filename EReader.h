@@ -118,18 +118,7 @@ void eReaderBuildLineIndex() {
     
     pos = lineEnd;
     
-    // Skip multiple consecutive newlines but preserve one
-    while (pos < fileSize && (fileBuffer[pos] == '\r' || fileBuffer[pos] == '\n')) {
-      if (fileBuffer[pos] == '\n') {
-        lineStarts.push_back(pos + 1);  // Empty line
-        linesProcessed++;
-      }
-      pos++;
-      if (fileBuffer[pos - 1] == '\n' && pos < fileSize && fileBuffer[pos] != '\n') {
-        break;  // Stop after first newline if next char isn't newline
-      }
-    }
-    
+    // Only add next line if we're not at the end and position has advanced
     if (pos < fileSize && pos > lineStarts.back()) {
       lineStarts.push_back(pos);
       linesProcessed++;
@@ -141,6 +130,14 @@ void eReaderBuildLineIndex() {
   }
   
   totalLines = lineStarts.size();
+  
+  // Validate consistency
+  if (totalLines != lineStarts.size()) {
+    Serial.printf("[EREADER] ERROR: Line count mismatch! totalLines=%d, lineStarts.size()=%d\n", 
+                  totalLines, lineStarts.size());
+    totalLines = lineStarts.size();  // Force sync
+  }
+  
   Serial.printf("[EREADER] Built line index: %d lines\n", totalLines);
   Serial.printf("[EREADER] Free heap after index: %d bytes\n", ESP.getFreeHeap());
   Serial.flush();
@@ -166,7 +163,8 @@ int eReaderGetLineToBuffer(int lineNumber, char* buffer, int maxLen) {
   }
   
   size_t start = lineStarts[lineNumber];
-  size_t end = (lineNumber + 1 < totalLines) ? lineStarts[lineNumber + 1] : fileSize;
+  // CRITICAL FIX: Check against lineStarts.size(), not totalLines, to avoid vector out-of-bounds
+  size_t end = ((size_t)(lineNumber + 1) < lineStarts.size()) ? lineStarts[lineNumber + 1] : fileSize;
   
   // Validate bounds
   if (start >= fileSize || end > fileSize || start > end) {
@@ -303,8 +301,14 @@ void eReaderDisplayPage() {
   if (lineStarts.size() != totalLines) {
     Serial.printf("[EREADER] ERROR: lineStarts size mismatch! size=%d totalLines=%d\n", 
                   lineStarts.size(), totalLines);
+    // Force sync to prevent crash
+    totalLines = lineStarts.size();
+  }
+  
+  if (lineStarts.empty() || totalLines == 0) {
+    Serial.println("[EREADER] ERROR: No lines in index");
     Paint_Clear(WHITE);
-    EPD_ShowString(EREADER_LEFT_MARGIN, EREADER_TOP_MARGIN + 30, (char*)"ERROR: Corrupt line index", 16, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN, EREADER_TOP_MARGIN + 30, (char*)"ERROR: Empty line index", 16, BLACK);
     EPD_Display(ImageBW);
     EPD_PartUpdate();
     return;
@@ -321,14 +325,23 @@ void eReaderDisplayPage() {
   Serial.flush();
   
   for (int i = 0; i < EREADER_LINES_PER_PAGE && (currentLine + i) < totalLines; i++) {
+    int targetLine = currentLine + i;
+    
+    // Additional safety check to prevent vector out-of-bounds
+    if (targetLine >= lineStarts.size()) {
+      Serial.printf("[EREADER] WARNING: Line %d exceeds lineStarts size %d, stopping\n", 
+                    targetLine, lineStarts.size());
+      break;
+    }
+    
     // Check if yPos is within safe bounds (accounting for font height)
     if (yPos + 16 > EREADER_MAX_Y) {
-      Serial.printf("[EREADER] WARNING: Line %d at y=%d would exceed bounds, stopping\n", currentLine + i, yPos);
+      Serial.printf("[EREADER] WARNING: Line %d at y=%d would exceed bounds, stopping\n", targetLine, yPos);
       break;
     }
     
     // Get line directly into buffer (no String operations)
-    int lineLen = eReaderGetLineToBuffer(currentLine + i, lineBuf, EREADER_CHARS_PER_LINE + 1);
+    int lineLen = eReaderGetLineToBuffer(targetLine, lineBuf, EREADER_CHARS_PER_LINE + 1);
     
     if (lineLen > 0) {
       EPD_ShowString(EREADER_LEFT_MARGIN, yPos, lineBuf, 16, BLACK);
