@@ -32,9 +32,12 @@ namespace SettingsNS {
     // Display settings
     int rotation;                   // Screen rotation (0, 90, 180, 270)
     
-    // WiFi settings (for AP mode)
-    char wifiSSID[MAX_WIFI_SSID_LENGTH];
-    char wifiPassword[MAX_WIFI_PASSWORD_LENGTH];
+    // WiFi settings
+    int wifiMode;                   // 1 = AP mode, 2 = STA mode
+    char wifiAPSSID[MAX_WIFI_SSID_LENGTH];     // AP mode: SSID to create
+    char wifiAPPassword[MAX_WIFI_PASSWORD_LENGTH];  // AP mode: password
+    char wifiSTASSID[MAX_WIFI_SSID_LENGTH];    // STA mode: SSID to connect to
+    char wifiSTAPassword[MAX_WIFI_PASSWORD_LENGTH]; // STA mode: password
     bool wifiEnabled;
     
     // UI settings
@@ -50,8 +53,11 @@ namespace SettingsNS {
     5,               // progressSaveFrequency
     16,              // fontSize
     0,               // rotation
-    "E-Reader-Portal", // wifiSSID
-    "ereader123",    // wifiPassword
+    1,               // wifiMode (1=AP, 2=STA)
+    "E-Reader-Portal", // wifiAPSSID
+    "ereader123",    // wifiAPPassword
+    "YourWiFiName",  // wifiSTASSID
+    "YourWiFiPass",  // wifiSTAPassword
     true,            // wifiEnabled
     true,            // showBatteryPercent
     false            // enableSounds
@@ -122,8 +128,11 @@ bool parseSettingsLine(const char* line) {
   else if (strcmp(key, "progressSaveFrequency") == 0) currentSettings.progressSaveFrequency = atoi(value);
   else if (strcmp(key, "fontSize") == 0) currentSettings.fontSize = atoi(value);
   else if (strcmp(key, "rotation") == 0) currentSettings.rotation = atoi(value);
-  else if (strcmp(key, "wifiSSID") == 0) strncpy(currentSettings.wifiSSID, value, MAX_WIFI_SSID_LENGTH - 1);
-  else if (strcmp(key, "wifiPassword") == 0) strncpy(currentSettings.wifiPassword, value, MAX_WIFI_PASSWORD_LENGTH - 1);
+  else if (strcmp(key, "wifiMode") == 0) currentSettings.wifiMode = atoi(value);
+  else if (strcmp(key, "wifiAPSSID") == 0) strncpy(currentSettings.wifiAPSSID, value, MAX_WIFI_SSID_LENGTH - 1);
+  else if (strcmp(key, "wifiAPPassword") == 0) strncpy(currentSettings.wifiAPPassword, value, MAX_WIFI_PASSWORD_LENGTH - 1);
+  else if (strcmp(key, "wifiSTASSID") == 0) strncpy(currentSettings.wifiSTASSID, value, MAX_WIFI_SSID_LENGTH - 1);
+  else if (strcmp(key, "wifiSTAPassword") == 0) strncpy(currentSettings.wifiSTAPassword, value, MAX_WIFI_PASSWORD_LENGTH - 1);
   else if (strcmp(key, "wifiEnabled") == 0) currentSettings.wifiEnabled = (atoi(value) != 0);
   else if (strcmp(key, "showBatteryPercent") == 0) currentSettings.showBatteryPercent = (atoi(value) != 0);
   else if (strcmp(key, "enableSounds") == 0) currentSettings.enableSounds = (atoi(value) != 0);
@@ -189,8 +198,11 @@ bool saveSettings() {
   file.printf("progressSaveFrequency=%d\n", currentSettings.progressSaveFrequency);
   file.printf("fontSize=%d\n", currentSettings.fontSize);
   file.printf("rotation=%d\n", currentSettings.rotation);
-  file.printf("wifiSSID=%s\n", currentSettings.wifiSSID);
-  file.printf("wifiPassword=%s\n", currentSettings.wifiPassword);
+  file.printf("wifiMode=%d\n", currentSettings.wifiMode);
+  file.printf("wifiAPSSID=%s\n", currentSettings.wifiAPSSID);
+  file.printf("wifiAPPassword=%s\n", currentSettings.wifiAPPassword);
+  file.printf("wifiSTASSID=%s\n", currentSettings.wifiSTASSID);
+  file.printf("wifiSTAPassword=%s\n", currentSettings.wifiSTAPassword);
   file.printf("wifiEnabled=%d\n", currentSettings.wifiEnabled ? 1 : 0);
   file.printf("showBatteryPercent=%d\n", currentSettings.showBatteryPercent ? 1 : 0);
   file.printf("enableSounds=%d\n", currentSettings.enableSounds ? 1 : 0);
@@ -548,34 +560,66 @@ void settingsDrawWiFiOptions() {
   Paint_Clear(WHITE);
   settingsDrawHeader("WiFi Options");
   
-  int startY = 45;
-  int lineHeight = 22;
+  int startY = 40;
+  int lineHeight = 20;
+  int line = 0;
   
-  EPD_ShowString(15, startY, "WiFi AP Mode Settings", 16, BLACK);
-  EPD_ShowString(15, startY + lineHeight, "(Restart required to apply)", 16, BLACK);
+  EPD_ShowString(15, startY + (line++ * lineHeight), "(Restart required to apply)", 16, BLACK);
+  line++; // Skip a line
   
-  char ssidText[64];
-  sprintf(ssidText, "SSID: %s", currentSettings.wifiSSID);
-  EPD_ShowString(15, startY + (3 * lineHeight), ssidText, 16, BLACK);
+  // WiFi Mode
+  char modeText[64];
+  sprintf(modeText, "Mode: %s", currentSettings.wifiMode == 1 ? "Access Point" : "Connect to WiFi");
+  if (selectedItem == 0) EPD_DrawRectangle(5, startY + (line * lineHeight) - 2, 787, startY + ((line + 1) * lineHeight) - 5, BLACK, 1);
+  EPD_ShowString(15, startY + (line++ * lineHeight), modeText, 16, selectedItem == 0 ? WHITE : BLACK);
+  line++; // Skip a line
   
-  char passText[64];
-  // Mask password
-  int passLen = strlen(currentSettings.wifiPassword);
-  char maskedPass[32] = "";
-  for (int i = 0; i < passLen && i < 20; i++) {
-    maskedPass[i] = '*';
+  if (currentSettings.wifiMode == 1) {
+    // AP Mode settings
+    EPD_ShowString(15, startY + (line++ * lineHeight), "Access Point Settings:", 16, BLACK);
+    
+    char apSSIDText[64];
+    sprintf(apSSIDText, "  AP Name: %s", currentSettings.wifiAPSSID);
+    EPD_ShowString(15, startY + (line++ * lineHeight), apSSIDText, 16, BLACK);
+    
+    char apPassText[64];
+    int passLen = strlen(currentSettings.wifiAPPassword);
+    char maskedPass[32] = "";
+    for (int i = 0; i < passLen && i < 20; i++) maskedPass[i] = '*';
+    maskedPass[passLen < 20 ? passLen : 20] = '\0';
+    sprintf(apPassText, "  Password: %s", maskedPass);
+    EPD_ShowString(15, startY + (line++ * lineHeight), apPassText, 16, BLACK);
+  } else {
+    // STA Mode settings
+    EPD_ShowString(15, startY + (line++ * lineHeight), "Connect to WiFi:", 16, BLACK);
+    
+    char staSSIDText[64];
+    sprintf(staSSIDText, "  Network: %s", currentSettings.wifiSTASSID);
+    EPD_ShowString(15, startY + (line++ * lineHeight), staSSIDText, 16, BLACK);
+    
+    char staPassText[64];
+    int passLen = strlen(currentSettings.wifiSTAPassword);
+    char maskedPass[32] = "";
+    for (int i = 0; i < passLen && i < 20; i++) maskedPass[i] = '*';
+    maskedPass[passLen < 20 ? passLen : 20] = '\0';
+    sprintf(staPassText, "  Password: %s", maskedPass);
+    EPD_ShowString(15, startY + (line++ * lineHeight), staPassText, 16, BLACK);
   }
-  maskedPass[passLen < 20 ? passLen : 20] = '\0';
-  sprintf(passText, "Password: %s", maskedPass);
-  EPD_ShowString(15, startY + (4 * lineHeight), passText, 16, BLACK);
   
-  EPD_ShowString(15, startY + (6 * lineHeight), 
+  line++; // Skip a line
+  
+  // WiFi Enable/Disable
+  EPD_ShowString(15, startY + (line * lineHeight), 
                  currentSettings.wifiEnabled ? "WiFi: Enabled" : "WiFi: Disabled", 
-                 16, selectedItem == 0 ? WHITE : BLACK);
-  if (selectedItem == 0) EPD_DrawRectangle(5, startY + (6 * lineHeight) - 2, 787, startY + (7 * lineHeight) - 5, BLACK, 1);
+                 16, selectedItem == 1 ? WHITE : BLACK);
+  if (selectedItem == 1) EPD_DrawRectangle(5, startY + (line * lineHeight) - 2, 787, startY + ((line + 1) * lineHeight) - 5, BLACK, 1);
+  line++;
   
-  EPD_ShowString(15, startY + (7 * lineHeight), "Back to Main Menu", 16, selectedItem == 1 ? WHITE : BLACK);
-  if (selectedItem == 1) EPD_DrawRectangle(5, startY + (7 * lineHeight) - 2, 787, startY + (8 * lineHeight) - 5, BLACK, 1);
+  line++; // Skip a line
+  
+  // Back option
+  EPD_ShowString(15, startY + (line * lineHeight), "Back to Main Menu", 16, selectedItem == 2 ? WHITE : BLACK);
+  if (selectedItem == 2) EPD_DrawRectangle(5, startY + (line * lineHeight) - 2, 787, startY + ((line + 1) * lineHeight) - 5, BLACK, 1);
   
   settingsDrawFooter("UP/DOWN: Navigate  OK: Toggle  EXIT: Back");
   
@@ -859,24 +903,29 @@ void settingsHandleWiFiOptionsInput(bool upPressed, bool downPressed, bool okPre
   
   if (upPressed) {
     selectedItem--;
-    if (selectedItem < 0) selectedItem = 1;
+    if (selectedItem < 0) selectedItem = 2;
     needsRefresh = true;
   }
   
   if (downPressed) {
     selectedItem++;
-    if (selectedItem > 1) selectedItem = 0;
+    if (selectedItem > 2) selectedItem = 0;
     needsRefresh = true;
   }
   
   if (okPressed) {
     switch (selectedItem) {
-      case 0: // WiFi enable/disable
+      case 0: // WiFi mode (AP vs STA)
+        currentSettings.wifiMode = (currentSettings.wifiMode == 1) ? 2 : 1;
+        needsRefresh = true;
+        break;
+        
+      case 1: // WiFi enable/disable
         currentSettings.wifiEnabled = !currentSettings.wifiEnabled;
         needsRefresh = true;
         break;
         
-      case 1: // Back
+      case 2: // Back
         currentMode = SETTINGS_MAIN_MENU;
         selectedItem = 0;
         needsRefresh = true;
@@ -1050,12 +1099,24 @@ bool settingsGetWiFiEnabled() {
   return SettingsNS::currentSettings.wifiEnabled;
 }
 
-const char* settingsGetWiFiSSID() {
-  return SettingsNS::currentSettings.wifiSSID;
+int settingsGetWiFiMode() {
+  return SettingsNS::currentSettings.wifiMode;
 }
 
-const char* settingsGetWiFiPassword() {
-  return SettingsNS::currentSettings.wifiPassword;
+const char* settingsGetWiFiAPSSID() {
+  return SettingsNS::currentSettings.wifiAPSSID;
+}
+
+const char* settingsGetWiFiAPPassword() {
+  return SettingsNS::currentSettings.wifiAPPassword;
+}
+
+const char* settingsGetWiFiSTASSID() {
+  return SettingsNS::currentSettings.wifiSTASSID;
+}
+
+const char* settingsGetWiFiSTAPassword() {
+  return SettingsNS::currentSettings.wifiSTAPassword;
 }
 
 bool settingsGetShowBatteryPercent() {

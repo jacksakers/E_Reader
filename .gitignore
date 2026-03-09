@@ -1,0 +1,34 @@
+# Environment and secrets
+.env
+
+# Arduino build files
+*.elf
+*.hex
+*.bin
+*.map
+
+# IDE files
+.vscode/
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# Logs
+*.log
+
+# Build directories
+build/
+.build/

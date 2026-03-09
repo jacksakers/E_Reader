@@ -8,24 +8,27 @@
 
 // Forward declarations for settings
 extern bool settingsGetWiFiEnabled();
-extern const char* settingsGetWiFiSSID();
-extern const char* settingsGetWiFiPassword();
+extern int settingsGetWiFiMode();
+extern const char* settingsGetWiFiAPSSID();
+extern const char* settingsGetWiFiAPPassword();
+extern const char* settingsGetWiFiSTASSID();
+extern const char* settingsGetWiFiSTAPassword();
 
 // ==================== WEB PORTAL CONFIGURATION ====================
 // Choose one mode:
-#define WEBPORTAL_MODE_AP 1      // Create Access Point
-#define WEBPORTAL_MODE_STA 2     // Connect to existing WiFi
+// #define WEBPORTAL_MODE_AP 1      // Create Access Point
+// #define WEBPORTAL_MODE_STA 2     // Connect to existing WiFi
 
-// Select mode here:
-#define WEBPORTAL_MODE WEBPORTAL_MODE_AP
+// // Select mode here:
+// #define WEBPORTAL_MODE WEBPORTAL_MODE_AP
 
 // AP Mode Configuration
-#define AP_SSID "E-Reader-Portal"
-#define AP_PASSWORD "ereader123"  // Set empty string "" for open network
+// #define AP_SSID "E-Reader-Portal"
+// #define AP_PASSWORD "ereader123"  // Set empty string "" for open network
 
 // Station Mode Configuration (if connecting to existing WiFi)
-#define WIFI_SSID "your_wifi_ssid"
-#define WIFI_PASSWORD "your_wifi_password"
+// #define WIFI_SSID "your_wifi_ssid"
+// #define WIFI_PASSWORD "your_wifi_password"
 
 // ==================== WEB PORTAL STATE ====================
 // External display buffer (defined in main file)
@@ -523,14 +526,17 @@ bool webPortalInit() {
   
   bool connected = false;
   
-  #if WEBPORTAL_MODE == WEBPORTAL_MODE_AP
+  // Get WiFi mode from settings (1=AP, 2=STA)
+  int wifiMode = settingsGetWiFiMode();
+  
+  if (wifiMode == 1) {
     // Access Point Mode
     Serial.println("[PORTAL] Creating Access Point...");
     WiFi.mode(WIFI_AP);
     
     // Get WiFi settings from settings system
-    const char* ssid = settingsGetWiFiSSID();
-    const char* password = settingsGetWiFiPassword();
+    const char* ssid = settingsGetWiFiAPSSID();
+    const char* password = settingsGetWiFiAPPassword();
     
     bool apStarted;
     if (strlen(password) > 0) {
@@ -548,11 +554,14 @@ bool webPortalInit() {
       Serial.println("[PORTAL] AP start failed");
     }
     
-  #elif WEBPORTAL_MODE == WEBPORTAL_MODE_STA
+  } else {
     // Station Mode - Connect to existing WiFi
-    Serial.printf("[PORTAL] Connecting to WiFi: %s\n", WIFI_SSID);
+    const char* ssid = settingsGetWiFiSTASSID();
+    const char* password = settingsGetWiFiSTAPassword();
+    
+    Serial.printf("[PORTAL] Connecting to WiFi: %s\n", ssid);
     WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    WiFi.begin(ssid, password);
     
     int attempts = 0;
     while (WiFi.status() != WL_CONNECTED && attempts < 20) {
@@ -568,7 +577,7 @@ bool webPortalInit() {
     } else {
       Serial.println("\n[PORTAL] WiFi connection failed");
     }
-  #endif
+  }
   
   if (!connected) {
     webPortalUpdateDisplay("WEB PORTAL", "WiFi Failed!", "Press EXIT to return");
@@ -593,21 +602,25 @@ bool webPortalInit() {
   char ipLine[50];
   sprintf(ipLine, "IP: %s", ipStr.c_str());
   
-  #if WEBPORTAL_MODE == WEBPORTAL_MODE_AP
+  int wifiMode = settingsGetWiFiMode();
+  
+  if (wifiMode == 1) {
+    // AP Mode
     char ssidLine[50];
-    sprintf(ssidLine, "WiFi: %s", settingsGetWiFiSSID());
+    sprintf(ssidLine, "WiFi: %s", settingsGetWiFiAPSSID());
     webPortalUpdateDisplay("WEB PORTAL - READY", 
                           ssidLine,
                           ipLine,
                           "Connect and upload files",
                           "Files uploaded: 0");
-  #else
+  } else {
+    // STA Mode
     webPortalUpdateDisplay("WEB PORTAL - READY",
                           "Connected to WiFi",
                           ipLine,
                           "Open browser to upload",
                           "Files uploaded: 0");
-  #endif
+  }
   
   return true;
 }
