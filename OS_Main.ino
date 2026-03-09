@@ -7,6 +7,7 @@
 #include "ButtonHandler.h"
 #include "EReader.h"
 #include "ArtFrame.h"
+#include "Settings.h"
 
 // ==================== PIN DEFINITIONS ====================
 #define SCREEN_PWR 7         // Screen power pin
@@ -114,6 +115,10 @@ void setup() {
   EPD_PartUpdate();
   
   delay(1000);
+  
+  // Initialize persistent storage and settings
+  initializePersistentStorage();
+  loadSettings();
   
   currentMode = MODE_HOME;
   needsRedraw = true;
@@ -295,6 +300,7 @@ void launchMode(int modeIndex) {
       
     case 4: // Settings
       currentMode = MODE_SETTINGS;
+      settingsInit();
       break;
       
     case 5: // Sleep
@@ -473,20 +479,27 @@ void runWebPortalMode() {
 
 // ==================== SETTINGS MODE ====================
 void runSettingsMode() {
-  Paint_Clear(WHITE);
-  EPD_ShowString(100, 100, (char*)"SETTINGS", 16, BLACK);
-  EPD_ShowString(100, 130, (char*)"Coming Soon!", 16, BLACK);
-  EPD_ShowString(100, 160, (char*)"Press EXIT to return", 16, BLACK);
-  EPD_Display(ImageBW);
-  EPD_PartUpdate();
+  // Update settings display if needed
+  settingsUpdate();
   
-  while (true) {
-    buttons->update();
-    if (buttons->exit()->wasPressed() || buttons->home()->wasPressed()) {
-      returnToHome();
-      return;
-    }
-    delay(10);
+  // Small delay to prevent overwhelming the system
+  delay(20);
+  
+  // Handle input
+  bool upPressed = buttons->prv()->wasPressed();
+  bool downPressed = buttons->next()->wasPressed();
+  bool okPressed = buttons->ok()->wasPressed();
+  bool exitPressed = buttons->exit()->wasPressed();
+  bool homePressed = buttons->home()->wasPressed();
+  
+  // Check if user wants to exit settings (from main menu only)
+  if ((exitPressed || homePressed) && !upPressed && !downPressed && !okPressed) {
+    Serial.println("[OS] Exiting Settings to home...");
+    Serial.flush();
+    settingsCleanup();
+    returnToHome();
+  } else {
+    settingsHandleInput(upPressed, downPressed, okPressed, exitPressed);
   }
 }
 

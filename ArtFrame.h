@@ -5,8 +5,11 @@
 #include "SD.h"
 #include <vector>
 
+// Forward declarations for settings
+extern int settingsGetArtCycleSeconds();
+extern bool settingsGetArtAutoCycleEnabled();
+
 // ==================== ART FRAME CONFIGURATION ====================
-#define ARTFRAME_CYCLE_INTERVAL 30000  // 30 seconds in milliseconds
 #define ARTFRAME_MAX_IMAGES 100        // Maximum number of art images to track
 #define ARTFRAME_DISPLAY_WIDTH 792     // Actual display width
 #define ARTFRAME_DISPLAY_HEIGHT 272    // Display height
@@ -251,8 +254,11 @@ void artFrameUpdateCycle() {
     return;
   }
   
+  // Get cycle interval from settings (convert seconds to milliseconds)
+  unsigned long cycleInterval = settingsGetArtCycleSeconds() * 1000UL;
+  
   // Check if it's time to cycle
-  if (currentTime - lastCycleTime >= ARTFRAME_CYCLE_INTERVAL) {
+  if (currentTime - lastCycleTime >= cycleInterval) {
     Serial.println("[ARTFRAME] Auto-cycling to next art...");
     artFrameNextArt();
     lastCycleTime = currentTime;
@@ -282,7 +288,7 @@ void artFrameInit() {
   // Initialize timing
   lastCycleTime = millis();
   lastInteractionTime = millis();
-  autoCycleEnabled = true;
+  autoCycleEnabled = settingsGetArtAutoCycleEnabled();
   showUIOverlay = true;
   needsRefresh = true;
   

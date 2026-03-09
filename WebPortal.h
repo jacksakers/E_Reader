@@ -6,6 +6,11 @@
 #include "SD.h"
 #include "EPD.h"
 
+// Forward declarations for settings
+extern bool settingsGetWiFiEnabled();
+extern const char* settingsGetWiFiSSID();
+extern const char* settingsGetWiFiPassword();
+
 // ==================== WEB PORTAL CONFIGURATION ====================
 // Choose one mode:
 #define WEBPORTAL_MODE_AP 1      // Create Access Point
@@ -523,16 +528,20 @@ bool webPortalInit() {
     Serial.println("[PORTAL] Creating Access Point...");
     WiFi.mode(WIFI_AP);
     
+    // Get WiFi settings from settings system
+    const char* ssid = settingsGetWiFiSSID();
+    const char* password = settingsGetWiFiPassword();
+    
     bool apStarted;
-    if (strlen(AP_PASSWORD) > 0) {
-      apStarted = WiFi.softAP(AP_SSID, AP_PASSWORD);
+    if (strlen(password) > 0) {
+      apStarted = WiFi.softAP(ssid, password);
     } else {
-      apStarted = WiFi.softAP(AP_SSID);
+      apStarted = WiFi.softAP(ssid);
     }
     
     if (apStarted) {
       WebPortalNS::serverIP = WiFi.softAPIP();
-      Serial.printf("[PORTAL] AP started: %s\n", AP_SSID);
+      Serial.printf("[PORTAL] AP started: %s\n", ssid);
       Serial.printf("[PORTAL] IP Address: %s\n", WebPortalNS::serverIP.toString().c_str());
       connected = true;
     } else {
@@ -586,7 +595,7 @@ bool webPortalInit() {
   
   #if WEBPORTAL_MODE == WEBPORTAL_MODE_AP
     char ssidLine[50];
-    sprintf(ssidLine, "WiFi: %s", AP_SSID);
+    sprintf(ssidLine, "WiFi: %s", settingsGetWiFiSSID());
     webPortalUpdateDisplay("WEB PORTAL - READY", 
                           ssidLine,
                           ipLine,

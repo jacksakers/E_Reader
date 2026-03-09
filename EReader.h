@@ -6,6 +6,10 @@
 #include "PersistentStorage.h"
 #include <vector>
 
+// Forward declarations for settings
+extern int settingsGetProgressSaveFrequency();
+extern int settingsGetFontSize();
+
 // ==================== E-READER CONFIGURATION ====================
 #define EREADER_CHARS_PER_LINE 98     // Slightly less than 99 for margin
 #define EREADER_LINES_PER_PAGE 11     // Reduced to fit within display bounds (was 13)
@@ -43,7 +47,6 @@ namespace EReaderNS {
   
   // Progress tracking
   static int scrollsSinceLastSave = 0;  // Counter for periodic saves
-  static const int SCROLLS_BETWEEN_SAVES = 5;  // Save progress every N scrolls
 }
 
 // ==================== TEXT PROCESSING ====================
@@ -651,7 +654,8 @@ void eReaderScrollDown(int lines = 1) {
   
   // Save progress periodically
   scrollsSinceLastSave++;
-  if (scrollsSinceLastSave >= SCROLLS_BETWEEN_SAVES) {
+  int saveFrequency = settingsGetProgressSaveFrequency();
+  if (scrollsSinceLastSave >= saveFrequency) {
     setBookProgress(currentFilename, currentLine, totalLines, true);
     scrollsSinceLastSave = 0;
   }
@@ -668,7 +672,8 @@ void eReaderScrollUp(int lines = 1) {
   
   // Save progress periodically
   scrollsSinceLastSave++;
-  if (scrollsSinceLastSave >= SCROLLS_BETWEEN_SAVES) {
+  int saveFrequency = settingsGetProgressSaveFrequency();
+  if (scrollsSinceLastSave >= saveFrequency) {
     setBookProgress(currentFilename, currentLine, totalLines, true);
     scrollsSinceLastSave = 0;
   }
