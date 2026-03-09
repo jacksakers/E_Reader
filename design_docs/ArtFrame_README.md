@@ -46,6 +46,9 @@ def convert_to_art(input_image_path, output_art_path):
     # Convert to 1-bit monochrome
     img = img.convert('1')
     
+    # Rotate 180 degrees to match display orientation
+    img = img.rotate(180)
+    
     # Get pixel data
     pixels = list(img.getdata())
     
@@ -57,7 +60,9 @@ def convert_to_art(input_image_path, output_art_path):
             for bit in range(8):
                 if x + bit < 792:
                     pixel_idx = y * 792 + x + bit
-                    if pixels[pixel_idx] == 0:  # Black pixel
+                    # In PIL mode '1': 0 = black, 255 = white
+                    # Hardware expects: bit 0 = black, bit 1 = white
+                    if pixels[pixel_idx] != 0:  # White pixel
                         byte_val |= (0x80 >> bit)
             byte_array.append(byte_val)
     

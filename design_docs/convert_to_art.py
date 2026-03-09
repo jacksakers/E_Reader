@@ -75,6 +75,10 @@ def convert_to_art(input_image_path, output_art_path, dither=True):
         else:
             canvas = canvas.convert('1')
         
+        # Rotate 180 degrees to match display orientation (Rotation = 180 in EPD.h)
+        canvas = canvas.rotate(180)
+        print(f"   Rotated 180° to match display")
+        
         # Get pixel data
         pixels = list(canvas.getdata())
         
@@ -102,7 +106,10 @@ def convert_to_art(input_image_path, output_art_path, dither=True):
                         # Get pixel value (only if within display bounds)
                         if display_x < DISPLAY_WIDTH:
                             pixel_idx = y * DISPLAY_WIDTH + display_x
-                            if pixels[pixel_idx] == 0:  # Black pixel
+                            # In PIL mode '1': 0 = black, 255 = white
+                            # In hardware: bit 0 = black, bit 1 = white
+                            # So we set the bit only for white pixels
+                            if pixels[pixel_idx] != 0:  # White pixel (255 in PIL)
                                 byte_val |= (0x80 >> bit)
                 
                 byte_array.append(byte_val)
