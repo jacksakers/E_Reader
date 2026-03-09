@@ -19,25 +19,25 @@ extern uint8_t ImageBW[27200];
 // ==================== E-READER STATE ====================
 namespace EReaderNS {
   // File management
-  char* fileBuffer = NULL;
-  size_t fileSize = 0;
-  String currentFilename = "";
-  String booksPath = "/books/";
+  static char* fileBuffer = NULL;
+  static size_t fileSize = 0;
+  static String currentFilename;
+  static String booksPath;
   
   // Reading position
-  int currentLine = 0;           // Current top line being displayed
-  int totalLines = 0;            // Total lines in the book
-  std::vector<size_t> lineStarts;  // Start position of each line in buffer
+  static int currentLine = 0;           // Current top line being displayed
+  static int totalLines = 0;            // Total lines in the book
+  static std::vector<size_t> lineStarts;  // Start position of each line in buffer
   
   // UI state
-  bool inBrowser = true;
-  bool needsRefresh = true;
-  std::vector<String> bookList;
-  int selectedBook = 0;
-  int browserScrollOffset = 0;   // For scrolling long book lists
+  static bool inBrowser = true;
+  static bool needsRefresh = true;
+  static std::vector<String> bookList;
+  static int selectedBook = 0;
+  static int browserScrollOffset = 0;   // For scrolling long book lists
   
   // Reading statistics
-  int readingProgress = 0;       // Percentage read (0-100)
+  static int readingProgress = 0;       // Percentage read (0-100)
 }
 
 // ==================== TEXT PROCESSING ====================
@@ -57,7 +57,7 @@ void eReaderBuildLineIndex() {
   
   try {
     lineStarts.reserve(fileSize / 50);  // Reserve space (estimate ~50 chars per line)
-    Serial.printf("[EREADER] Reserved space for ~%d lines\\n", fileSize / 50);
+    Serial.printf("[EREADER] Reserved space for ~%d lines\n", fileSize / 50);
   } catch (...) {
     Serial.println("[EREADER] WARNING: Could not reserve vector space");
   }
@@ -71,7 +71,7 @@ void eReaderBuildLineIndex() {
   while (pos < fileSize && linesProcessed < MAX_LINES) {
     // Progress update every 1000 lines
     if (linesProcessed > 0 && linesProcessed % 1000 == 0) {
-      Serial.printf("[EREADER] Processed %d lines...\\n", linesProcessed);
+      Serial.printf("[EREADER] Processed %d lines...\n", linesProcessed);
       Serial.flush();
       yield();  // Give other tasks a chance to run
     }
@@ -136,7 +136,7 @@ void eReaderBuildLineIndex() {
   }
   
   if (linesProcessed >= MAX_LINES) {
-    Serial.printf("[EREADER] WARNING: Hit maximum line limit (%d)\\n", MAX_LINES);
+    Serial.printf("[EREADER] WARNING: Hit maximum line limit (%d)\n", MAX_LINES);
   }
   
   totalLines = lineStarts.size();
@@ -174,8 +174,13 @@ void eReaderDrawHeader(const char* title, int progress) {
   EPD_DrawLine(0, 0, 792, 0, BLACK);
   EPD_DrawLine(0, 35, 792, 35, BLACK);
   
-  // Title
-  EPD_ShowString(EREADER_LEFT_MARGIN, 8, (char*)title, 16, BLACK);
+  // Title - make a safe copy first
+  if (title != NULL && strlen(title) > 0) {
+    char titleBuf[60];
+    strncpy(titleBuf, title, 59);
+    titleBuf[59] = '\0';
+    EPD_ShowString(EREADER_LEFT_MARGIN, 8, titleBuf, 16, BLACK);
+  }
   
   // Progress bar
   int barWidth = 200;
@@ -211,8 +216,13 @@ void eReaderDrawFooter(int currentPage, int totalPages, const char* controls) {
   sprintf(pageText, "Page %d / %d", currentPage, totalPages);
   EPD_ShowString(EREADER_LEFT_MARGIN, footerY, pageText, 16, BLACK);
   
-  // Controls hint
-  EPD_ShowString(300, footerY, (char*)controls, 16, BLACK);
+  // Controls hint - make safe copy
+  if (controls != NULL) {
+    char controlsBuf[80];
+    strncpy(controlsBuf, controls, 79);
+    controlsBuf[79] = '\0';
+    EPD_ShowString(300, footerY, controlsBuf, 16, BLACK);
+  }
 }
 
 // ==================== READER DISPLAY ====================
@@ -223,10 +233,10 @@ void eReaderDisplayPage() {
   Serial.println("[EREADER] Displaying page...");
   Serial.flush();
   
-  Paint_Clear(WHITE);
-  
-  if (fileBuffer == NULL || fileSize == 0) {
-    Serial.println("[EREADER] ERROR: No file loaded");
+  // Safety check BEFORE doing anything
+  if (fileBuffer == NULL || fileSize == 0 || totalLines == 0) {
+    Serial.println("[EREADER] ERROR: No file loaded or empty");
+    Paint_Clear(WHITE);
     EPD_ShowString(200, 100, (char*)"No book loaded", 16, BLACK);
     EPD_ShowString(200, 130, (char*)"Press EXIT to return to browser", 16, BLACK);
     EPD_Display(ImageBW);
@@ -241,10 +251,29 @@ void eReaderDisplayPage() {
   // Calculate reading progress
   readingProgress = totalLines > 0 ? (currentLine * 100 / totalLines) : 0;
   
-  // Draw header
+  Serial.printf("[EREADER] Drawing page %d/%d (lines %d-%d of %d)\n", 
+                currentPage, totalPages, currentLine, 
+                min(currentLine + EREADER_LINES_PER_PAGE, totalLines), totalLines);
+  Serial.flush();
+  
+  // Clear screen before drawing
+  Serial.println("[EREADER] Clearing screen...");
+  Serial.flush();
+  Paint_Clear(WHITE);
+  Serial.println("[EREADER] Screen cleared");
+  Serial.flush();
+  
+  // Draw header - use safe string
+  Serial.println("[EREADER] Drawing header...");
+  Serial.flush();
   eReaderDrawHeader(currentFilename.c_str(), readingProgress);
+  Serial.println("[EREADER] Header drawn");
+  Serial.flush();
   
   // Draw text content
+  Serial.println("[EREADER] Drawing text content...");
+  Serial.flush();
+  
   int yPos = EREADER_TOP_MARGIN;
   int linesDisplayed = 0;
   
@@ -252,22 +281,41 @@ void eReaderDisplayPage() {
     String line = eReaderGetLine(currentLine + i);
     
     if (line.length() > 0) {
-      EPD_ShowString(EREADER_LEFT_MARGIN, yPos, (char*)line.c_str(), 16, BLACK);
+      // Make a safe copy in a char buffer
+      char lineBuf[EREADER_CHARS_PER_LINE + 1];
+      int copyLen = min((int)line.length(), EREADER_CHARS_PER_LINE);
+      strncpy(lineBuf, line.c_str(), copyLen);
+      lineBuf[copyLen] = '\0';
+      
+      EPD_ShowString(EREADER_LEFT_MARGIN, yPos, lineBuf, 16, BLACK);
     }
     
     yPos += EREADER_LINE_HEIGHT;
     linesDisplayed++;
   }
   
+  Serial.printf("[EREADER] Drew %d lines\n", linesDisplayed);
+  Serial.flush();
+  
   // Draw footer
+  Serial.println("[EREADER] Drawing footer...");
+  Serial.flush();
   eReaderDrawFooter(currentPage, totalPages, "EXIT: Menu | HOME: Quit");
+  Serial.println("[EREADER] Footer drawn");
+  Serial.flush();
   
   // Update display
+  Serial.println("[EREADER] Updating EPD display...");
+  Serial.flush();
   EPD_Display(ImageBW);
+  Serial.println("[EREADER] Calling EPD_PartUpdate...");
+  Serial.flush();
   EPD_PartUpdate();
+  Serial.println("[EREADER] EPD update complete");
+  Serial.flush();
   
-  Serial.printf("[EREADER] Page %d/%d, Line %d/%d, Progress %d%%\n", 
-                currentPage, totalPages, currentLine, totalLines, readingProgress);
+  Serial.printf("[EREADER] Page %d/%d displayed successfully\n", currentPage, totalPages);
+  Serial.flush();
 }
 
 // ==================== FILE BROWSER ====================
@@ -537,16 +585,24 @@ void eReaderInit() {
   Serial.printf("[EREADER] Free heap at init: %d bytes\n", ESP.getFreeHeap());
   Serial.flush();
   
+  // Initialize String variables
+  currentFilename = "";
+  booksPath = "/books/";
+  bookList.clear();
+  
   inBrowser = true;
   needsRefresh = true;
   selectedBook = 0;
   browserScrollOffset = 0;
   currentLine = 0;
+  totalLines = 0;
+  lineStarts.clear();
   
   if (fileBuffer != NULL) {
     free(fileBuffer);
     fileBuffer = NULL;
   }
+  fileSize = 0;
   
   Serial.println("[EREADER] Initializing display...");
   Serial.flush();

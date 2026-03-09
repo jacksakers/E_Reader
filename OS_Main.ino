@@ -118,9 +118,9 @@ void setup() {
   needsRedraw = true;
   
   Serial.println("Boot complete. Welcome to E-Ink OS!");
-  Serial.printf("Free heap: %d bytes\\n", ESP.getFreeHeap());
-  Serial.printf("Free PSRAM: %d bytes\\n", ESP.getFreePsram());
-  Serial.println("=========================================\\n");
+  Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
+  Serial.printf("Free PSRAM: %d bytes\n", ESP.getFreePsram());
+  Serial.println("=========================================\n");
 }
 
 // ==================== MAIN LOOP ====================
@@ -341,7 +341,7 @@ void runEReaderMode() {
     bool exitPressed = buttons->exit()->wasPressed();
     
     if (prvPressed || nextPressed || okPressed || exitPressed) {
-      Serial.printf("[OS] Browser input: PRV=%d, NEXT=%d, OK=%d, EXIT=%d\\n", 
+      Serial.printf("[OS] Browser input: PRV=%d, NEXT=%d, OK=%d, EXIT=%d\n", 
                     prvPressed, nextPressed, okPressed, exitPressed);
       Serial.flush();
     }
@@ -363,7 +363,7 @@ void runEReaderMode() {
     bool homePressed = buttons->home()->wasPressed();
     
     if (prvPressed || nextPressed || exitPressed || homePressed) {
-      Serial.printf("[OS] Reader input: PRV=%d, NEXT=%d, EXIT=%d, HOME=%d\\n", 
+      Serial.printf("[OS] Reader input: PRV=%d, NEXT=%d, EXIT=%d, HOME=%d\n", 
                     prvPressed, nextPressed, exitPressed, homePressed);
       Serial.flush();
     }
