@@ -7,11 +7,12 @@
 
 // ==================== E-READER CONFIGURATION ====================
 #define EREADER_CHARS_PER_LINE 98     // Slightly less than 99 for margin
-#define EREADER_LINES_PER_PAGE 13     // Leave room for header/footer
+#define EREADER_LINES_PER_PAGE 11     // Reduced to fit within display bounds (was 13)
 #define EREADER_LINE_HEIGHT 18        // Slightly more spacing for readability
 #define EREADER_TOP_MARGIN 45         // Space for header
 #define EREADER_BOTTOM_MARGIN 30      // Space for footer
 #define EREADER_LEFT_MARGIN 10        // Left text margin
+#define EREADER_MAX_Y 242             // Maximum Y coordinate for text (272 - BOTTOM_MARGIN)
 
 // Reference to global display buffer from OS_Main.ino
 extern uint8_t ImageBW[27200];
@@ -151,24 +152,16 @@ int eReaderGetLineToBuffer(int lineNumber, char* buffer, int maxLen) {
   
   // Safety checks
   if (buffer == NULL || maxLen <= 0) {
-    Serial.println("[EREADER] ERROR: Invalid buffer in getLine");
     return 0;
   }
   
   buffer[0] = '\0';  // Always ensure null termination
   
-  if (lineNumber < 0 || lineNumber >= totalLines) {
-    Serial.printf("[EREADER] ERROR: Line %d out of range (0-%d)\n", lineNumber, totalLines-1);
-    return 0;
-  }
-  
-  if (fileBuffer == NULL) {
-    Serial.println("[EREADER] ERROR: fileBuffer is NULL");
+  if (lineNumber < 0 || lineNumber >= totalLines || fileBuffer == NULL) {
     return 0;
   }
   
   if (lineNumber >= lineStarts.size()) {
-    Serial.printf("[EREADER] ERROR: lineStarts[%d] doesn't exist (size=%d)\n", lineNumber, lineStarts.size());
     return 0;
   }
   
@@ -177,7 +170,6 @@ int eReaderGetLineToBuffer(int lineNumber, char* buffer, int maxLen) {
   
   // Validate bounds
   if (start >= fileSize || end > fileSize || start > end) {
-    Serial.printf("[EREADER] ERROR: Invalid line bounds start=%d end=%d size=%d\n", start, end, fileSize);
     return 0;
   }
   
@@ -299,39 +291,19 @@ void eReaderDisplayPage() {
   Serial.println("[EREADER] Header drawn");
   Serial.flush();
   
-  // Test draw to verify EPD functions work
-  Serial.println("[EREADER] Test drawing static string...");
-  Serial.flush();
-  char testStr[] = "TEST LINE 1234567890";
-  EPD_ShowString(EREADER_LEFT_MARGIN, EREADER_TOP_MARGIN, testStr, 16, BLACK);
-  Serial.println("[EREADER] Test draw complete - EPD functions work!");
-  Serial.flush();
-  delay(10);  // Small delay
-  
   // Draw text content
   Serial.println("[EREADER] Drawing text content...");
-  Serial.printf("[EREADER] totalLines=%d, currentLine=%d, lineStarts.size()=%d\n", 
-                totalLines, currentLine, lineStarts.size());
-  Serial.printf("[EREADER] fileBuffer=0x%p, fileSize=%d\n", fileBuffer, fileSize);
-  Serial.flush();
-  
-  // Show first few bytes of file for debugging
-  Serial.print("[EREADER] First 50 bytes: ");
-  for (int i = 0; i < 50 && i < fileSize; i++) {
-    char c = fileBuffer[i];
-    if (c >= 32 && c <= 126) {
-      Serial.print(c);
-    } else {
-      Serial.printf("[%02X]", (uint8_t)c);
-    }
-  }
-  Serial.println();
+  Serial.printf("[EREADER] totalLines=%d, currentLine=%d, LINES_PER_PAGE=%d\n", 
+                totalLines, currentLine, EREADER_LINES_PER_PAGE);
+  Serial.printf("[EREADER] Y range: %d to %d (max safe: %d)\n", 
+                EREADER_TOP_MARGIN, EREADER_MAX_Y, EREADER_MAX_Y);
   Serial.flush();
   
   // Validate state before drawing
   if (lineStarts.size() != totalLines) {
     Serial.printf("[EREADER] ERROR: lineStarts size mismatch! size=%d totalLines=%d\n", 
                   lineStarts.size(), totalLines);
+    Paint_Clear(WHITE);
     EPD_ShowString(EREADER_LEFT_MARGIN, EREADER_TOP_MARGIN + 30, (char*)"ERROR: Corrupt line index", 16, BLACK);
     EPD_Display(ImageBW);
     EPD_PartUpdate();
@@ -345,27 +317,21 @@ void eReaderDisplayPage() {
   char lineBuf[EREADER_CHARS_PER_LINE + 1];
   memset(lineBuf, 0, sizeof(lineBuf));
   
-  Serial.println("[EREADER] Starting line drawing loop...");
+  Serial.println("[EREADER] Drawing lines...");
   Serial.flush();
   
   for (int i = 0; i < EREADER_LINES_PER_PAGE && (currentLine + i) < totalLines; i++) {
-    Serial.printf("[EREADER] Drawing line %d...\n", currentLine + i);
-    Serial.flush();
+    // Check if yPos is within safe bounds (accounting for font height)
+    if (yPos + 16 > EREADER_MAX_Y) {
+      Serial.printf("[EREADER] WARNING: Line %d at y=%d would exceed bounds, stopping\n", currentLine + i, yPos);
+      break;
+    }
     
     // Get line directly into buffer (no String operations)
     int lineLen = eReaderGetLineToBuffer(currentLine + i, lineBuf, EREADER_CHARS_PER_LINE + 1);
     
-    Serial.printf("[EREADER] Line %d: length=%d\n", currentLine + i, lineLen);
-    Serial.flush();
-    
     if (lineLen > 0) {
-      Serial.printf("[EREADER] Calling EPD_ShowString at y=%d...\n", yPos);
-      Serial.flush();
-      
       EPD_ShowString(EREADER_LEFT_MARGIN, yPos, lineBuf, 16, BLACK);
-      
-      Serial.println("[EREADER] EPD_ShowString complete");
-      Serial.flush();
     }
     
     yPos += EREADER_LINE_HEIGHT;
@@ -565,7 +531,7 @@ bool eReaderLoadBook(const String& filename) {
     return false;
   }
   
-  Serial.printf("[EREADER] Buffer allocated at 0x%p\n", fileBuffer);
+  Serial.printf("[EREADER] Buffer allocated at %p\n", fileBuffer);
   Serial.printf("[EREADER] Free heap after malloc: %d bytes\n", ESP.getFreeHeap());
   Serial.flush();
   
