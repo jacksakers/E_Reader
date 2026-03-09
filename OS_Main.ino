@@ -118,6 +118,9 @@ void setup() {
   needsRedraw = true;
   
   Serial.println("Boot complete. Welcome to E-Ink OS!");
+  Serial.printf("Free heap: %d bytes\\n", ESP.getFreeHeap());
+  Serial.printf("Free PSRAM: %d bytes\\n", ESP.getFreePsram());
+  Serial.println("=========================================\\n");
 }
 
 // ==================== MAIN LOOP ====================
@@ -268,8 +271,8 @@ void handleHomeNavigation() {
 
 // ==================== MODE LAUNCHER ====================
 void launchMode(int modeIndex) {
-  Serial.printf("[OS] Launching mode: %s\n", modeNames[modeIndex]);
-  
+  Serial.printf("[OS] Launching mode: %s\n", modeNames[modeIndex]);  Serial.printf("[OS] Free heap before launch: %d bytes\\n", ESP.getFreeHeap());
+  Serial.flush();  
   switch (modeIndex) {
     case 0: // E-Reader
       currentMode = MODE_EREADER;
@@ -300,13 +303,25 @@ void launchMode(int modeIndex) {
 
 // ==================== RETURN TO HOME ====================
 void returnToHome() {
+  Serial.println("[OS] ========================================");
   Serial.println("[OS] Returning to home screen...");
+  Serial.printf("[OS] Free heap: %d bytes\\n", ESP.getFreeHeap());
+  Serial.flush();
+  delay(100);
+  
   currentMode = MODE_HOME;
   needsRedraw = true;
   
   // Reinitialize display for home screen
+  Serial.println("[OS] Reinitializing display...");
+  Serial.flush();
+  
   EPD_GPIOInit();
   Paint_NewImage(ImageBW, DISPLAY_WIDTH, DISPLAY_HEIGHT, Rotation, WHITE);
+  
+  Serial.println("[OS] Display reinitialized");
+  Serial.println("[OS] ========================================");
+  Serial.flush();
 }
 
 // ==================== E-READER MODE ====================
@@ -314,32 +329,51 @@ void runEReaderMode() {
   // Update E-Reader display if needed
   eReaderUpdate();
   
+  // Small delay to prevent overwhelming the system
+  delay(20);
+  
   // Handle input based on current state
   if (eReaderIsInBrowser()) {
     // Browser navigation
-    eReaderHandleBrowserInput(
-      buttons->prv()->wasPressed(),
-      buttons->next()->wasPressed(),
-      buttons->ok()->wasPressed(),
-      buttons->exit()->wasPressed()
-    );
+    bool prvPressed = buttons->prv()->wasPressed();
+    bool nextPressed = buttons->next()->wasPressed();
+    bool okPressed = buttons->ok()->wasPressed();
+    bool exitPressed = buttons->exit()->wasPressed();
+    
+    if (prvPressed || nextPressed || okPressed || exitPressed) {
+      Serial.printf("[OS] Browser input: PRV=%d, NEXT=%d, OK=%d, EXIT=%d\\n", 
+                    prvPressed, nextPressed, okPressed, exitPressed);
+      Serial.flush();
+    }
+    
+    eReaderHandleBrowserInput(prvPressed, nextPressed, okPressed, exitPressed);
     
     // Exit to home
-    if (buttons->exit()->wasPressed()) {
+    if (exitPressed) {
+      Serial.println("[OS] Exiting E-Reader to home...");
+      Serial.flush();
       eReaderCleanup();
       returnToHome();
     }
   } else {
     // Reading navigation
-    eReaderHandleReaderInput(
-      buttons->prv()->wasPressed(),
-      buttons->next()->wasPressed(),
-      buttons->exit()->wasPressed(),
-      buttons->home()->wasPressed()
-    );
+    bool prvPressed = buttons->prv()->wasPressed();
+    bool nextPressed = buttons->next()->wasPressed();
+    bool exitPressed = buttons->exit()->wasPressed();
+    bool homePressed = buttons->home()->wasPressed();
+    
+    if (prvPressed || nextPressed || exitPressed || homePressed) {
+      Serial.printf("[OS] Reader input: PRV=%d, NEXT=%d, EXIT=%d, HOME=%d\\n", 
+                    prvPressed, nextPressed, exitPressed, homePressed);
+      Serial.flush();
+    }
+    
+    eReaderHandleReaderInput(prvPressed, nextPressed, exitPressed, homePressed);
     
     // Exit to home
-    if (buttons->home()->wasPressed()) {
+    if (homePressed) {
+      Serial.println("[OS] Returning to home from reader...");
+      Serial.flush();
       eReaderCleanup();
       returnToHome();
     }

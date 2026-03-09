@@ -46,13 +46,36 @@ namespace EReaderNS {
 void eReaderBuildLineIndex() {
   using namespace EReaderNS;
   
+  Serial.println("[EREADER] Building line index...");
+  Serial.flush();
+  
   lineStarts.clear();
-  if (fileBuffer == NULL || fileSize == 0) return;
+  if (fileBuffer == NULL || fileSize == 0) {
+    Serial.println("[EREADER] ERROR: No file buffer or empty file");
+    return;
+  }
+  
+  try {
+    lineStarts.reserve(fileSize / 50);  // Reserve space (estimate ~50 chars per line)
+    Serial.printf("[EREADER] Reserved space for ~%d lines\\n", fileSize / 50);
+  } catch (...) {
+    Serial.println("[EREADER] WARNING: Could not reserve vector space");
+  }
+  Serial.flush();
   
   lineStarts.push_back(0);  // First line starts at 0
   size_t pos = 0;
+  int linesProcessed = 0;
+  const int MAX_LINES = 10000;  // Safety limit
   
-  while (pos < fileSize) {
+  while (pos < fileSize && linesProcessed < MAX_LINES) {
+    // Progress update every 1000 lines
+    if (linesProcessed > 0 && linesProcessed % 1000 == 0) {
+      Serial.printf("[EREADER] Processed %d lines...\\n", linesProcessed);
+      Serial.flush();
+      yield();  // Give other tasks a chance to run
+    }
+    
     size_t lineEnd = pos;
     size_t lastSpace = pos;
     int charCount = 0;
@@ -98,6 +121,7 @@ void eReaderBuildLineIndex() {
     while (pos < fileSize && (fileBuffer[pos] == '\r' || fileBuffer[pos] == '\n')) {
       if (fileBuffer[pos] == '\n') {
         lineStarts.push_back(pos + 1);  // Empty line
+        linesProcessed++;
       }
       pos++;
       if (fileBuffer[pos - 1] == '\n' && pos < fileSize && fileBuffer[pos] != '\n') {
@@ -107,11 +131,18 @@ void eReaderBuildLineIndex() {
     
     if (pos < fileSize && pos > lineStarts.back()) {
       lineStarts.push_back(pos);
+      linesProcessed++;
     }
+  }
+  
+  if (linesProcessed >= MAX_LINES) {
+    Serial.printf("[EREADER] WARNING: Hit maximum line limit (%d)\\n", MAX_LINES);
   }
   
   totalLines = lineStarts.size();
   Serial.printf("[EREADER] Built line index: %d lines\n", totalLines);
+  Serial.printf("[EREADER] Free heap after index: %d bytes\n", ESP.getFreeHeap());
+  Serial.flush();
 }
 
 // Get text for a specific line
@@ -189,9 +220,13 @@ void eReaderDrawFooter(int currentPage, int totalPages, const char* controls) {
 void eReaderDisplayPage() {
   using namespace EReaderNS;
   
+  Serial.println("[EREADER] Displaying page...");
+  Serial.flush();
+  
   Paint_Clear(WHITE);
   
   if (fileBuffer == NULL || fileSize == 0) {
+    Serial.println("[EREADER] ERROR: No file loaded");
     EPD_ShowString(200, 100, (char*)"No book loaded", 16, BLACK);
     EPD_ShowString(200, 130, (char*)"Press EXIT to return to browser", 16, BLACK);
     EPD_Display(ImageBW);
@@ -340,68 +375,114 @@ void eReaderDisplayBrowser() {
 bool eReaderLoadBook(const String& filename) {
   using namespace EReaderNS;
   
+  Serial.println("[EREADER] ========================================");
   Serial.printf("[EREADER] Loading book: %s\n", filename.c_str());
+  Serial.printf("[EREADER] Free heap before load: %d bytes\n", ESP.getFreeHeap());
+  Serial.flush();
   
   // Free previous buffer
   if (fileBuffer != NULL) {
+    Serial.println("[EREADER] Freeing previous buffer...");
     free(fileBuffer);
     fileBuffer = NULL;
   }
   
   // Reset state
+  Serial.println("[EREADER] Resetting state...");
   lineStarts.clear();
   currentLine = 0;
   totalLines = 0;
+  Serial.flush();
   
   // Open file
   String filepath = booksPath + filename;
+  Serial.printf("[EREADER] Opening file: %s\n", filepath.c_str());
+  Serial.flush();
+  
   File file = SD.open(filepath);
   
   if (!file) {
-    Serial.println("[EREADER] Failed to open file");
+    Serial.println("[EREADER] ERROR: Failed to open file");
+    Serial.flush();
     return false;
   }
   
   fileSize = file.size();
-  Serial.printf("[EREADER] File size: %d bytes\n", fileSize);
+  Serial.printf("[EREADER] File opened. Size: %d bytes\n", fileSize);
+  Serial.flush();
   
   // Check if file fits in memory
-  if (fileSize > 1000000) {  // 1MB limit
-    Serial.println("[EREADER] File too large");
+  size_t availableHeap = ESP.getFreeHeap();
+  Serial.printf("[EREADER] Available heap: %d bytes\n", availableHeap);
+  
+  if (fileSize > 500000) {  // 500KB limit for safety
+    Serial.printf("[EREADER] ERROR: File too large (%d bytes, limit 500KB)\n", fileSize);
+    file.close();
+    return false;
+  }
+  
+  if (fileSize + 50000 > availableHeap) {  // Need at least 50KB buffer
+    Serial.printf("[EREADER] ERROR: Not enough heap (need %d, have %d)\n", fileSize + 50000, availableHeap);
     file.close();
     return false;
   }
   
   // Allocate memory
+  Serial.printf("[EREADER] Allocating %d bytes...\n", fileSize + 1);
+  Serial.flush();
+  
   fileBuffer = (char*)malloc(fileSize + 1);
   if (fileBuffer == NULL) {
-    Serial.println("[EREADER] Not enough memory");
+    Serial.println("[EREADER] ERROR: malloc() failed");
+    Serial.flush();
     file.close();
     return false;
   }
   
+  Serial.printf("[EREADER] Buffer allocated at 0x%p\n", fileBuffer);
+  Serial.printf("[EREADER] Free heap after malloc: %d bytes\n", ESP.getFreeHeap());
+  Serial.flush();
+  
   // Read file
+  Serial.println("[EREADER] Reading file...");
+  Serial.flush();
+  
   size_t bytesRead = file.read((uint8_t*)fileBuffer, fileSize);
   fileBuffer[fileSize] = '\0';
   file.close();
   
+  Serial.printf("[EREADER] Read %d bytes\n", bytesRead);
+  Serial.flush();
+  
   if (bytesRead != fileSize) {
-    Serial.printf("[EREADER] Read error: %d / %d bytes\n", bytesRead, fileSize);
+    Serial.printf("[EREADER] ERROR: Read mismatch: %d / %d bytes\n", bytesRead, fileSize);
     free(fileBuffer);
     fileBuffer = NULL;
     return false;
   }
   
   // Store filename
+  Serial.println("[EREADER] Storing filename...");
   currentFilename = filename;
   if (currentFilename.length() > 50) {
     currentFilename = currentFilename.substring(0, 47) + "...";
   }
+  Serial.printf("[EREADER] Filename: %s\n", currentFilename.c_str());
+  Serial.flush();
   
   // Build line index with word wrapping
+  Serial.println("[EREADER] Building line index...");
+  Serial.flush();
+  delay(100);
+  
   eReaderBuildLineIndex();
   
   Serial.printf("[EREADER] Book loaded successfully: %d lines\n", totalLines);
+  Serial.printf("[EREADER] Final free heap: %d bytes\n", ESP.getFreeHeap());
+  Serial.println("[EREADER] ========================================");
+  Serial.flush();
+  delay(100);
+  
   return true;
 }
 
@@ -452,7 +533,9 @@ void eReaderGoToEnd() {
 void eReaderInit() {
   using namespace EReaderNS;
   
-  Serial.println("[EREADER] Initializing E-Reader...");
+  Serial.println("[EREADER] ======== INITIALIZING E-READER ========");
+  Serial.printf("[EREADER] Free heap at init: %d bytes\n", ESP.getFreeHeap());
+  Serial.flush();
   
   inBrowser = true;
   needsRefresh = true;
@@ -465,20 +548,34 @@ void eReaderInit() {
     fileBuffer = NULL;
   }
   
+  Serial.println("[EREADER] Initializing display...");
+  Serial.flush();
+  
   EPD_GPIOInit();
   Paint_NewImage(ImageBW, 800, 272, Rotation, WHITE);
+  
+  Serial.println("[EREADER] E-Reader initialized");
+  Serial.printf("[EREADER] Free heap after init: %d bytes\n", ESP.getFreeHeap());
+  Serial.println("[EREADER] =====================================");
+  Serial.flush();
 }
 
 void eReaderUpdate() {
   using namespace EReaderNS;
   
   if (needsRefresh) {
+    Serial.printf("[EREADER] Update requested (inBrowser=%d)\n", inBrowser);
+    Serial.flush();
+    
     if (inBrowser) {
       eReaderDisplayBrowser();
     } else {
       eReaderDisplayPage();
     }
     needsRefresh = false;
+    
+    Serial.println("[EREADER] Update complete");
+    Serial.flush();
   }
 }
 
@@ -514,9 +611,23 @@ void eReaderHandleBrowserInput(bool upPressed, bool downPressed, bool okPressed,
   }
   
   if (okPressed && bookList.size() > 0) {
+    Serial.println("[EREADER] OK pressed - loading book...");
+    Serial.flush();
+    delay(100);
+    
     if (eReaderLoadBook(bookList[selectedBook])) {
+      Serial.println("[EREADER] Book loaded, switching to reader view...");
+      Serial.flush();
+      delay(100);
+      
       inBrowser = false;
       needsRefresh = true;
+      
+      Serial.println("[EREADER] Switched to reader mode");
+      Serial.flush();
+    } else {
+      Serial.println("[EREADER] ERROR: Failed to load book");
+      Serial.flush();
     }
   }
   
