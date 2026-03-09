@@ -3,6 +3,7 @@
 
 #include "EPD.h"
 #include "SD.h"
+#include "PersistentStorage.h"
 #include <vector>
 
 // ==================== E-READER CONFIGURATION ====================
@@ -39,6 +40,10 @@ namespace EReaderNS {
   
   // Reading statistics
   static int readingProgress = 0;       // Percentage read (0-100)
+  
+  // Progress tracking
+  static int scrollsSinceLastSave = 0;  // Counter for periodic saves
+  static const int SCROLLS_BETWEEN_SAVES = 5;  // Save progress every N scrolls
 }
 
 // ==================== TEXT PROCESSING ====================
@@ -433,13 +438,30 @@ void eReaderDisplayBrowser() {
       EPD_ShowString(EREADER_LEFT_MARGIN + 5, yPos, (char*)"> ", 16, BLACK);
     }
     
-    // Display filename (truncate if too long)
+    // Display filename (truncate if too long to leave room for progress)
     String displayName = bookList[bookIdx];
-    if (displayName.length() > 90) {
-      displayName = displayName.substring(0, 87) + "...";
+    
+    // Get saved progress for this book
+    int savedLine = 0;
+    int savedTotal = 0;
+    int savedPercent = 0;
+    bool hasProgress = getBookProgress(bookList[bookIdx], &savedLine, &savedTotal, &savedPercent);
+    
+    // Shorten filename to leave room for progress indicator
+    int maxNameLen = hasProgress ? 60 : 90;
+    if (displayName.length() > maxNameLen) {
+      displayName = displayName.substring(0, maxNameLen - 3) + "...";
     }
     
     EPD_ShowString(EREADER_LEFT_MARGIN + 25, yPos, (char*)displayName.c_str(), 16, BLACK);
+    
+    // Display progress if available
+    if (hasProgress) {
+      char progressStr[30];
+      sprintf(progressStr, "[%d%%]", savedPercent);
+      EPD_ShowString(550, yPos, progressStr, 16, BLACK);
+    }
+    
     yPos += 18;
   }
   
@@ -590,6 +612,25 @@ bool eReaderLoadBook(const String& filename) {
   
   Serial.printf("[EREADER] Book loaded successfully: %d lines\n", totalLines);
   Serial.printf("[EREADER] Final free heap: %d bytes\n", ESP.getFreeHeap());
+  
+  // Load saved progress if available
+  int savedLine = 0;
+  int savedTotal = 0;
+  int savedPercent = 0;
+  if (getBookProgress(filename, &savedLine, &savedTotal, &savedPercent)) {
+    // Validate saved line is still valid for this version of the book
+    if (savedLine < totalLines && savedLine >= 0) {
+      currentLine = savedLine;
+      Serial.printf("[EREADER] Restored reading position: Line %d (%d%%)\n", currentLine, savedPercent);
+    } else {
+      Serial.println("[EREADER] Saved progress invalid (book may have changed), starting from beginning");
+      currentLine = 0;
+    }
+  } else {
+    Serial.println("[EREADER] No saved progress, starting from beginning");
+    currentLine = 0;
+  }
+  
   Serial.println("[EREADER] ========================================");
   Serial.flush();
   delay(100);
@@ -607,6 +648,13 @@ void eReaderScrollDown(int lines = 1) {
     currentLine = max(0, totalLines - EREADER_LINES_PER_PAGE);
   }
   needsRefresh = true;
+  
+  // Save progress periodically
+  scrollsSinceLastSave++;
+  if (scrollsSinceLastSave >= SCROLLS_BETWEEN_SAVES) {
+    setBookProgress(currentFilename, currentLine, totalLines, true);
+    scrollsSinceLastSave = 0;
+  }
 }
 
 void eReaderScrollUp(int lines = 1) {
@@ -617,6 +665,13 @@ void eReaderScrollUp(int lines = 1) {
     currentLine = 0;
   }
   needsRefresh = true;
+  
+  // Save progress periodically
+  scrollsSinceLastSave++;
+  if (scrollsSinceLastSave >= SCROLLS_BETWEEN_SAVES) {
+    setBookProgress(currentFilename, currentLine, totalLines, true);
+    scrollsSinceLastSave = 0;
+  }
 }
 
 void eReaderPageDown() {
@@ -631,12 +686,14 @@ void eReaderGoToStart() {
   using namespace EReaderNS;
   currentLine = 0;
   needsRefresh = true;
+  setBookProgress(currentFilename, currentLine, totalLines, true);
 }
 
 void eReaderGoToEnd() {
   using namespace EReaderNS;
   currentLine = max(0, totalLines - EREADER_LINES_PER_PAGE);
   needsRefresh = true;
+  setBookProgress(currentFilename, currentLine, totalLines, true);
 }
 
 // ==================== PUBLIC INTERFACE ====================
@@ -647,6 +704,9 @@ void eReaderInit() {
   Serial.println("[EREADER] ======== INITIALIZING E-READER ========");
   Serial.printf("[EREADER] Free heap at init: %d bytes\n", ESP.getFreeHeap());
   Serial.flush();
+  
+  // Initialize persistent storage
+  initializePersistentStorage();
   
   // Initialize String variables
   currentFilename = "";
@@ -784,6 +844,11 @@ void eReaderCleanup() {
   using namespace EReaderNS;
   
   Serial.println("[EREADER] Cleaning up...");
+  
+  // Save final progress before cleanup
+  if (fileBuffer != NULL && totalLines > 0 && !currentFilename.isEmpty()) {
+    setBookProgress(currentFilename, currentLine, totalLines, true);
+  }
   
   if (fileBuffer != NULL) {
     // ps_malloc and malloc both use free() for deallocation
