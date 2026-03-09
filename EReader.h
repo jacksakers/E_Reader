@@ -13,11 +13,11 @@
 #define EREADER_BOTTOM_MARGIN 30      // Space for footer
 #define EREADER_LEFT_MARGIN 10        // Left text margin
 
+// Reference to global display buffer from OS_Main.ino
+extern uint8_t ImageBW[27200];
+
 // ==================== E-READER STATE ====================
 namespace EReaderNS {
-  // External display buffer
-  extern uint8_t ImageBW[27200];
-  
   // File management
   char* fileBuffer = NULL;
   size_t fileSize = 0;
