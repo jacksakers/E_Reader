@@ -3,6 +3,7 @@
 #include "SD.h"
 #include <WiFi.h>
 #include <WebServer.h>
+#include "WebPortal.h"
 
 // ==================== PIN DEFINITIONS ====================
 #define SCREEN_PWR 7         // Screen power pin
@@ -620,22 +621,50 @@ void runArtFrameMode() {
 
 // ==================== WEB PORTAL MODE ====================
 void runWebPortalMode() {
-  Paint_Clear(WHITE);
-  EPD_ShowString(100, 100, (char*)"WEB PORTAL", 16, BLACK);
-  EPD_ShowString(100, 130, (char*)"Coming Soon!", 16, BLACK);
-  EPD_ShowString(100, 160, (char*)"Press EXIT to return", 16, BLACK);
-  EPD_Display(ImageBW);
-  EPD_PartUpdate();
+  Serial.println("[PORTAL] Starting Web Portal Mode");
   
+  // Initialize display
+  EPD_GPIOInit();
+  Paint_NewImage(ImageBW, DISPLAY_WIDTH, DISPLAY_HEIGHT, Rotation, WHITE);
+  
+  // Initialize web portal
+  if (!webPortalInit()) {
+    Serial.println("[PORTAL] Failed to initialize");
+    delay(3000);
+    returnToHome();
+    return;
+  }
+  
+  Serial.println("[PORTAL] Web Portal running - waiting for uploads");
+  
+  // Main portal loop
   while (true) {
+    // Handle web server requests
+    webPortalUpdate();
+    
+    // Check for EXIT button
     if (digitalRead(EXIT_KEY) == 0) {
       delay(100);
       if (digitalRead(EXIT_KEY) == 1) {
+        Serial.println("[PORTAL] EXIT pressed, stopping portal");
+        webPortalStop();
         returnToHome();
         return;
       }
     }
-    delay(50);
+    
+    // Check for HOME button
+    if (digitalRead(HOME_KEY) == 0) {
+      delay(100);
+      if (digitalRead(HOME_KEY) == 1) {
+        Serial.println("[PORTAL] HOME pressed, stopping portal");
+        webPortalStop();
+        returnToHome();
+        return;
+      }
+    }
+    
+    delay(10);  // Small delay for server handling
   }
 }
 
