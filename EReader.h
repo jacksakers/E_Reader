@@ -6,13 +6,18 @@
 #include <vector>
 
 // ==================== E-READER CONFIGURATION ====================
-#define EREADER_CHARS_PER_LINE 98     // Slightly less than 99 for margin
-#define EREADER_LINES_PER_PAGE 11     // Reduced to fit within display bounds (was 13)
-#define EREADER_LINE_HEIGHT 18        // Slightly more spacing for readability
-#define EREADER_TOP_MARGIN 45         // Space for header
-#define EREADER_BOTTOM_MARGIN 30      // Space for footer
+// NOTE: Display is 792x272 pixels (landscape) but with Rotation 180:
+//   - Paint.width = 272 (vertical axis in rotated coordinates)
+//   - Paint.height = 800 (horizontal axis in rotated coordinates)
+// Therefore: X coordinates must stay within 0-271, Y within 0-799
+
+#define EREADER_CHARS_PER_LINE 32     // Max chars per line: 272px / 8px per char = 34, use 32 for safety
+#define EREADER_LINES_PER_PAGE 42     // Lines per page: (800 - margins) / line_height
+#define EREADER_LINE_HEIGHT 16        // Font height (16px for size 16 font)
+#define EREADER_TOP_MARGIN 50         // Space for header
+#define EREADER_BOTTOM_MARGIN 50      // Space for footer
 #define EREADER_LEFT_MARGIN 10        // Left text margin
-#define EREADER_MAX_Y 242             // Maximum Y coordinate for text (272 - BOTTOM_MARGIN)
+#define EREADER_MAX_Y 750             // Maximum Y coordinate for text (800 - BOTTOM_MARGIN)
 
 // Reference to global display buffer from OS_Main.ino
 extern uint8_t ImageBW[27200];
@@ -189,58 +194,44 @@ int eReaderGetLineToBuffer(int lineNumber, char* buffer, int maxLen) {
 // ==================== UI RENDERING ====================
 
 void eReaderDrawHeader(const char* title, int progress) {
-  // Top border
-  EPD_DrawLine(0, 0, 792, 0, BLACK);
-  EPD_DrawLine(0, 35, 792, 35, BLACK);
+  // With Rotation 180: X is 0-271, Y is 0-799
+  // Header is at top: Y near 0
   
-  // Title - make a safe copy first
+  // Top border line (horizontal)
+  EPD_DrawLine(0, 35, 271, 35, BLACK);
+  
+  // Title - shortened to fit width
   if (title != NULL && strlen(title) > 0) {
-    char titleBuf[60];
-    strncpy(titleBuf, title, 59);
-    titleBuf[59] = '\0';
-    EPD_ShowString(EREADER_LEFT_MARGIN, 8, titleBuf, 16, BLACK);
+    char titleBuf[20];  // 20 chars max at 8px/char = 160px
+    strncpy(titleBuf, title, 19);
+    titleBuf[19] = '\0';
+    EPD_ShowString(EREADER_LEFT_MARGIN, 10, titleBuf, 16, BLACK);
   }
   
-  // Progress bar
-  int barWidth = 200;
-  int barX = 550;
-  int barY = 12;
-  int barHeight = 12;
-  
-  // Progress bar background
-  EPD_DrawRectangle(barX, barY, barX + barWidth, barY + barHeight, BLACK, 0);
-  
-  // Progress bar fill
-  int fillWidth = (barWidth - 4) * progress / 100;
-  if (fillWidth > 0) {
-    for (int y = barY + 2; y < barY + barHeight - 2; y++) {
-      EPD_DrawLine(barX + 2, y, barX + 2 + fillWidth, y, BLACK);
-    }
-  }
-  
-  // Progress text
+  // Progress percentage on same line as title
   char progressText[10];
   sprintf(progressText, "%d%%", progress);
-  EPD_ShowString(barX + barWidth + 10, barY, progressText, 16, BLACK);
+  EPD_ShowString(200, 10, progressText, 16, BLACK);
 }
 
 void eReaderDrawFooter(int currentPage, int totalPages, const char* controls) {
-  int footerY = 272 - EREADER_BOTTOM_MARGIN + 5;
+  // Footer is at bottom: Y near 800
+  int footerY = 800 - EREADER_BOTTOM_MARGIN + 10;
   
-  // Bottom border
-  EPD_DrawLine(0, 272 - EREADER_BOTTOM_MARGIN, 792, 272 - EREADER_BOTTOM_MARGIN, BLACK);
+  // Bottom border line
+  EPD_DrawLine(0, footerY - 5, 271, footerY - 5, BLACK);
   
   // Page numbers
-  char pageText[50];
-  sprintf(pageText, "Page %d / %d", currentPage, totalPages);
+  char pageText[20];
+  sprintf(pageText, "Pg %d/%d", currentPage, totalPages);
   EPD_ShowString(EREADER_LEFT_MARGIN, footerY, pageText, 16, BLACK);
   
-  // Controls hint - make safe copy
+  // Simplified controls hint 
   if (controls != NULL) {
-    char controlsBuf[80];
-    strncpy(controlsBuf, controls, 79);
-    controlsBuf[79] = '\0';
-    EPD_ShowString(300, footerY, controlsBuf, 16, BLACK);
+    char controlsBuf[15];
+    strncpy(controlsBuf, "EXIT=Menu", 14);
+    controlsBuf[14] = '\0';
+    EPD_ShowString(150, footerY, controlsBuf, 16, BLACK);
   }
 }
 
@@ -293,8 +284,8 @@ void eReaderDisplayPage() {
   Serial.println("[EREADER] Drawing text content...");
   Serial.printf("[EREADER] totalLines=%d, currentLine=%d, LINES_PER_PAGE=%d\n", 
                 totalLines, currentLine, EREADER_LINES_PER_PAGE);
-  Serial.printf("[EREADER] Y range: %d to %d (max safe: %d)\n", 
-                EREADER_TOP_MARGIN, EREADER_MAX_Y, EREADER_MAX_Y);
+  Serial.printf("[EREADER] Y range: %d to %d (max safe: %d) | X range: %d to %d\n", 
+                EREADER_TOP_MARGIN, EREADER_MAX_Y, EREADER_MAX_Y, EREADER_LEFT_MARGIN, 271);
   Serial.flush();
   
   // Validate state before drawing
@@ -317,9 +308,8 @@ void eReaderDisplayPage() {
   int yPos = EREADER_TOP_MARGIN;
   int linesDisplayed = 0;
   
-  // Pre-allocate line buffer outside loop and zero it
+  // Pre-allocate line buffer outside loop and zero it completely
   char lineBuf[EREADER_CHARS_PER_LINE + 1];
-  memset(lineBuf, 0, sizeof(lineBuf));
   
   Serial.println("[EREADER] Drawing lines...");
   Serial.flush();
@@ -334,17 +324,25 @@ void eReaderDisplayPage() {
       break;
     }
     
-    // Check if yPos is within safe bounds (accounting for font height)
-    if (yPos + 16 > EREADER_MAX_Y) {
-      Serial.printf("[EREADER] WARNING: Line %d at y=%d would exceed bounds, stopping\n", targetLine, yPos);
+    // Check if yPos is within safe bounds BEFORE attempting to draw
+    // Ensure there's enough room for a 16-pixel high font
+    if (yPos < EREADER_TOP_MARGIN || yPos > (EREADER_MAX_Y - 16)) {
+      Serial.printf("[EREADER] WARNING: Line %d at y=%d out of safe range [%d-%d], stopping\n", 
+                    targetLine, yPos, EREADER_TOP_MARGIN, EREADER_MAX_Y - 16);
       break;
     }
+    
+    // Clear buffer for this line
+    memset(lineBuf, 0, sizeof(lineBuf));
     
     // Get line directly into buffer (no String operations)
     int lineLen = eReaderGetLineToBuffer(targetLine, lineBuf, EREADER_CHARS_PER_LINE + 1);
     
     if (lineLen > 0) {
-      EPD_ShowString(EREADER_LEFT_MARGIN, yPos, lineBuf, 16, BLACK);
+      // Extra safety: validate x position is also within bounds
+      if (EREADER_LEFT_MARGIN >= 0 && EREADER_LEFT_MARGIN < 780) {
+        EPD_ShowString(EREADER_LEFT_MARGIN, yPos, lineBuf, 16, BLACK);
+      }
     }
     
     yPos += EREADER_LINE_HEIGHT;
@@ -382,19 +380,17 @@ void eReaderDisplayBrowser() {
   
   Paint_Clear(WHITE);
   
-  // Header
-  EPD_DrawLine(0, 0, 792, 0, BLACK);
-  EPD_DrawLine(0, 35, 792, 35, BLACK);
-  EPD_ShowString(EREADER_LEFT_MARGIN, 8, (char*)"E-READER - SELECT BOOK", 16, BLACK);
+  // Header (with correct rotated dimensions: X=0-271, Y=0-799)
+  EPD_DrawLine(0, 35, 271, 35, BLACK);
+  char* headerText = (char*)"E-READER";
+  EPD_ShowString(EREADER_LEFT_MARGIN, 10, headerText, 16, BLACK);
   
   // Check for books folder
   File dir = SD.open(booksPath);
   if (!dir) {
-    EPD_ShowString(EREADER_LEFT_MARGIN, 60, (char*)"ERROR: /books/ folder not found", 16, BLACK);
-    EPD_ShowString(EREADER_LEFT_MARGIN, 90, (char*)"Please create /books/ on SD card", 16, BLACK);
-    EPD_ShowString(EREADER_LEFT_MARGIN, 120, (char*)"Use Web Portal to upload books", 16, BLACK);
-    EPD_DrawLine(0, 240, 792, 240, BLACK);
-    EPD_ShowString(EREADER_LEFT_MARGIN, 248, (char*)"EXIT: Return to Home", 16, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN, 100, (char*)"ERROR: No /books/", 16, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN, 130, (char*)"folder found", 16, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN, 700, (char*)"EXIT: Home", 16, BLACK);
     EPD_Display(ImageBW);
     EPD_PartUpdate();
     return;
@@ -420,53 +416,47 @@ void eReaderDisplayBrowser() {
   std::sort(bookList.begin(), bookList.end());
   
   if (bookList.size() == 0) {
-    EPD_ShowString(EREADER_LEFT_MARGIN, 60, (char*)"No books found in /books/", 16, BLACK);
-    EPD_ShowString(EREADER_LEFT_MARGIN, 90, (char*)"Upload .txt files via Web Portal", 16, BLACK);
-    EPD_DrawLine(0, 240, 792, 240, BLACK);
-    EPD_ShowString(EREADER_LEFT_MARGIN, 248, (char*)"EXIT: Return to Home", 16, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN, 100, (char*)"No books found", 16, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN, 130, (char*)"Upload .txt", 16, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN, 700, (char*)"EXIT: Home", 16, BLACK);
     EPD_Display(ImageBW);
     EPD_PartUpdate();
     return;
   }
   
-  // Display books (with scrolling support)
-  int maxVisible = 11;  // Books visible at once
+  // Display books (scrolling support)
+  int maxVisible = 35;  // Books visible at once (more with taller display)
   int startIdx = browserScrollOffset;
-  int yPos = 50;
+  int yPos = 60;
   
   for (int i = 0; i < maxVisible && (startIdx + i) < bookList.size(); i++) {
     int bookIdx = startIdx + i;
     
+    // Check if we're running out of Y space
+    if (yPos + 18 > 700) break;
+    
     // Highlight selected book
     if (bookIdx == selectedBook) {
-      // Draw selection box
-      EPD_DrawRectangle(5, yPos - 2, 787, yPos + 16, BLACK, 0);
-      EPD_ShowString(EREADER_LEFT_MARGIN + 5, yPos, (char*)"> ", 16, BLACK);
+      // Draw selection indicator
+      EPD_ShowString(EREADER_LEFT_MARGIN, yPos, (char*)">", 16, BLACK);
     }
     
-    // Display filename (truncate if too long)
+    // Display filename (truncate if too long - max 30 chars at 8px/char)
     String displayName = bookList[bookIdx];
-    if (displayName.length() > 90) {
-      displayName = displayName.substring(0, 87) + "...";
+    if (displayName.length() > 28) {
+      displayName = displayName.substring(0, 25) + "...";
     }
     
-    EPD_ShowString(EREADER_LEFT_MARGIN + 25, yPos, (char*)displayName.c_str(), 16, BLACK);
+    EPD_ShowString(EREADER_LEFT_MARGIN + 16, yPos, (char*)displayName.c_str(), 16, BLACK);
     yPos += 18;
   }
   
-  // Footer with instructions
-  EPD_DrawLine(0, 240, 792, 240, BLACK);
-  char footer[100];
-  sprintf(footer, "Books: %d | UP/DOWN: Select | OK: Open | EXIT: Home", bookList.size());
-  EPD_ShowString(EREADER_LEFT_MARGIN, 248, footer, 16, BLACK);
-  
-  // Scroll indicators
-  if (browserScrollOffset > 0) {
-    EPD_ShowString(750, 50, (char*)"^", 16, BLACK);
-  }
-  if (browserScrollOffset + maxVisible < bookList.size()) {
-    EPD_ShowString(750, 220, (char*)"v", 16, BLACK);
-  }
+  // Footer
+  EPD_DrawLine(0, 755, 271, 755, BLACK);
+  char footer[30];
+  sprintf(footer, "%d books", bookList.size());
+  EPD_ShowString(EREADER_LEFT_MARGIN, 765, footer, 16, BLACK);
+  EPD_ShowString(150, 765, (char*)"OK=Open", 16, BLACK);
   
   EPD_Display(ImageBW);
   EPD_PartUpdate();
