@@ -46,7 +46,7 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 600px;
+            max-width: 700px;
             margin: 50px auto;
             padding: 20px;
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
@@ -68,6 +68,35 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             text-align: center;
             color: #666;
             margin-bottom: 30px;
+        }
+        .tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            border-bottom: 2px solid #667eea;
+        }
+        .tab {
+            padding: 12px 25px;
+            cursor: pointer;
+            background: #f0f0f0;
+            border: none;
+            border-radius: 5px 5px 0 0;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        .tab:hover {
+            background: #e0e0e0;
+        }
+        .tab.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: bold;
+        }
+        .tab-content {
+            display: none;
+        }
+        .tab-content.active {
+            display: block;
         }
         .upload-section {
             border: 3px dashed #667eea;
@@ -98,6 +127,128 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             border-radius: 25px;
             cursor: pointer;
             transition: transform 0.2s;
+        }
+        button:hover {
+            transform: scale(1.05);
+        }
+        button:active {
+            transform: scale(0.95);
+        }
+        .status {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: bold;
+            display: none;
+        }
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 2px solid #c3e6cb;
+            display: block;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 2px solid #f5c6cb;
+            display: block;
+        }
+        .info {
+            background: #e7f3ff;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+            margin-bottom: 20px;
+        }
+        .progress {
+            width: 100%;
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin: 15px 0;
+            display: none;
+        }
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s;
+            text-align: center;
+            line-height: 30px;
+            color: white;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📚 E-Reader Portal</h1>
+        <p class="subtitle">Upload books and artwork to your E-Reader</p>
+        
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('books')">📖 Books</button>
+            <button class="tab" onclick="switchTab('art')">🎨 Art</button>
+        </div>
+        
+        <!-- Books Tab -->
+        <div id="booksTab" class="tab-content active">
+            <div class="info">
+                <strong>ℹ️ Book Upload:</strong>
+                <ul style="margin: 10px 0; padding-left: 20px;">
+                    <li>Upload .txt or .epub files</li>
+                    <li>Files saved to /books/ folder</li>
+                    <li>Maximum file size: 10MB</li>
+                    <li>Files uploaded: <span id="bookCount">0</span></li>
+                </ul>
+            </div>
+            
+            <div class="upload-section">
+                <h3>📁 Select Book File</h3>
+                <form id="bookUploadForm" enctype="multipart/form-data">
+                    <input type="file" name="file" id="bookFileInput" accept=".txt,.epub" required>
+                    <br>
+                    <button type="submit">🚀 Upload Book</button>
+                </form>
+                
+                <div class="progress" id="bookProgress">
+                    <div class="progress-bar" id="bookProgressBar">0%</div>
+                </div>
+            </div>
+            
+            <div id="bookStatus" class="status"></div>
+        </div>
+        
+        <!-- Art Tab -->
+        <div id="artTab" class="tab-content">
+            <div class="info">
+                <strong>ℹ️ Art Upload:</strong>
+                <ul style="margin: 10px 0; padding-left: 20px;">
+                    <li>Upload .art files (792x272 raw bitmap)</li>
+                    <li>Files saved to /art/ folder</li>
+                    <li>Use image converter to create .art files</li>
+                    <li>Art frames cycle every 30 seconds</li>
+                    <li>Files uploaded: <span id="artCount">0</span></li>
+                </ul>
+            </div>
+            
+            <div class="upload-section">
+                <h3>🎨 Select Art File</h3>
+                <form id="artUploadForm" enctype="multipart/form-data">
+                    <input type="file" name="file" id="artFileInput" accept=".art" required>
+                    <br>
+                    <button type="submit">🚀 Upload Art</button>
+                </form>
+                
+                <div class="progress" id="artProgress">
+                    <div class="progress-bar" id="artProgressBar">0%</div>
+                </div>
+            </div>
+            
+            <div id="artStatus" class="status"></div>
+        </div>
             font-weight: bold;
         }
         button:hover {
@@ -205,16 +356,55 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
     </div>
     
     <script>
-        let uploadCount = 0;
+        let bookCount = 0;
+        let artCount = 0;
         
-        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
+        // Tab switching
+        function switchTab(tab) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
             
-            const fileInput = document.getElementById('fileInput');
+            // Show selected tab
+            if (tab === 'books') {
+                document.getElementById('booksTab').classList.add('active');
+                document.querySelectorAll('.tab')[0].classList.add('active');
+            } else {
+                document.getElementById('artTab').classList.add('active');
+                document.querySelectorAll('.tab')[1].classList.add('active');
+            }
+        }
+        
+        // Book upload handler
+        document.getElementById('bookUploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            uploadFile('book', 
+                      document.getElementById('bookFileInput'), 
+                      '/upload',
+                      'bookStatus', 
+                      'bookProgress', 
+                      'bookProgressBar',
+                      'bookCount');
+        });
+        
+        // Art upload handler
+        document.getElementById('artUploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            uploadFile('art', 
+                      document.getElementById('artFileInput'), 
+                      '/uploadArt',
+                      'artStatus', 
+                      'artProgress', 
+                      'artProgressBar',
+                      'artCount');
+        });
+        
+        // Generic upload function
+        function uploadFile(type, fileInput, url, statusId, progressId, progressBarId, countId) {
             const file = fileInput.files[0];
-            const statusDiv = document.getElementById('status');
-            const progress = document.getElementById('progress');
-            const progressBar = document.getElementById('progressBar');
+            const statusDiv = document.getElementById(statusId);
+            const progress = document.getElementById(progressId);
+            const progressBar = document.getElementById(progressBarId);
             
             if (!file) {
                 statusDiv.className = 'status error';
@@ -229,48 +419,48 @@ const char HTML_PAGE[] PROGMEM = R"rawliteral(
             const formData = new FormData();
             formData.append('file', file);
             
-            try {
-                const xhr = new XMLHttpRequest();
+            const xhr = new XMLHttpRequest();
+            
+            xhr.upload.addEventListener('progress', (e) => {
+                if (e.lengthComputable) {
+                    const percent = Math.round((e.loaded / e.total) * 100);
+                    progressBar.style.width = percent + '%';
+                    progressBar.textContent = percent + '%';
+                }
+            });
+            
+            xhr.addEventListener('load', () => {
+                progress.style.display = 'none';
                 
-                xhr.upload.addEventListener('progress', (e) => {
-                    if (e.lengthComputable) {
-                        const percent = Math.round((e.loaded / e.total) * 100);
-                        progressBar.style.width = percent + '%';
-                        progressBar.textContent = percent + '%';
-                    }
-                });
-                
-                xhr.addEventListener('load', () => {
-                    progress.style.display = 'none';
+                if (xhr.status === 200) {
+                    statusDiv.className = 'status success';
+                    statusDiv.textContent = '✅ File uploaded successfully: ' + file.name;
                     
-                    if (xhr.status === 200) {
-                        statusDiv.className = 'status success';
-                        statusDiv.textContent = '✅ File uploaded successfully: ' + file.name;
-                        uploadCount++;
-                        document.getElementById('uploadCount').textContent = uploadCount;
-                        fileInput.value = '';
-                        progressBar.style.width = '0%';
+                    if (type === 'book') {
+                        bookCount++;
+                        document.getElementById('bookCount').textContent = bookCount;
                     } else {
-                        statusDiv.className = 'status error';
-                        statusDiv.textContent = '❌ Upload failed: ' + xhr.responseText;
+                        artCount++;
+                        document.getElementById('artCount').textContent = artCount;
                     }
-                });
-                
-                xhr.addEventListener('error', () => {
-                    progress.style.display = 'none';
+                    
+                    fileInput.value = '';
+                    progressBar.style.width = '0%';
+                } else {
                     statusDiv.className = 'status error';
-                    statusDiv.textContent = '❌ Upload error occurred';
-                });
-                
-                xhr.open('POST', '/upload');
-                xhr.send(formData);
-                
-            } catch (error) {
+                    statusDiv.textContent = '❌ Upload failed: ' + xhr.responseText;
+                }
+            });
+            
+            xhr.addEventListener('error', () => {
                 progress.style.display = 'none';
                 statusDiv.className = 'status error';
-                statusDiv.textContent = '❌ Error: ' + error.message;
-            }
-        });
+                statusDiv.textContent = '❌ Upload error occurred';
+            });
+            
+            xhr.open('POST', url);
+            xhr.send(formData);
+        }
     </script>
 </body>
 </html>
@@ -366,6 +556,54 @@ void webPortalHandleUploadResponse() {
   WebPortalNS::server.send(200, "text/plain", "Upload successful");
 }
 
+// Handle art file upload
+void webPortalHandleArtUpload() {
+  HTTPUpload& upload = WebPortalNS::server.upload();
+  static File uploadFile;
+  
+  if (upload.status == UPLOAD_FILE_START) {
+    String filename = upload.filename;
+    if (!filename.startsWith("/")) filename = "/" + filename;
+    
+    String filepath = "/art" + filename;
+    Serial.printf("[PORTAL] Art upload started: %s\n", filepath.c_str());
+    
+    // Create /art directory if it doesn't exist
+    if (!SD.exists("/art")) {
+      SD.mkdir("/art");
+    }
+    
+    uploadFile = SD.open(filepath, FILE_WRITE);
+    if (!uploadFile) {
+      Serial.println("[PORTAL] Failed to open file for writing");
+    } else {
+      WebPortalNS::statusMessage = "Uploading art: " + filename;
+      WebPortalNS::needsDisplayUpdate = true;
+    }
+    
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (uploadFile) {
+      uploadFile.write(upload.buf, upload.currentSize);
+      Serial.printf("[PORTAL] Writing %d bytes\n", upload.currentSize);
+    }
+    
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (uploadFile) {
+      uploadFile.close();
+      Serial.printf("[PORTAL] Art upload complete: %d bytes\n", upload.totalSize);
+      
+      WebPortalNS::uploadedFiles++;
+      WebPortalNS::statusMessage = "Art upload complete!";
+      WebPortalNS::needsDisplayUpdate = true;
+    }
+  }
+}
+
+// Send art upload response
+void webPortalHandleArtUploadResponse() {
+  WebPortalNS::server.send(200, "text/plain", "Art upload successful");
+}
+
 // Handle 404
 void webPortalHandleNotFound() {
   WebPortalNS::server.send(404, "text/plain", "Not found");
@@ -431,6 +669,7 @@ bool webPortalInit() {
   // Setup web server routes
   WebPortalNS::server.on("/", HTTP_GET, webPortalHandleRoot);
   WebPortalNS::server.on("/upload", HTTP_POST, webPortalHandleUploadResponse, webPortalHandleUpload);
+  WebPortalNS::server.on("/uploadArt", HTTP_POST, webPortalHandleArtUploadResponse, webPortalHandleArtUpload);
   WebPortalNS::server.onNotFound(webPortalHandleNotFound);
   
   // Start server

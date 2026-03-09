@@ -6,6 +6,7 @@
 #include "WebPortal.h"
 #include "ButtonHandler.h"
 #include "EReader.h"
+#include "ArtFrame.h"
 
 // ==================== PIN DEFINITIONS ====================
 #define SCREEN_PWR 7         // Screen power pin
@@ -285,6 +286,7 @@ void launchMode(int modeIndex) {
       
     case 2: // Art Frame
       currentMode = MODE_ARTFRAME;
+      artFrameInit();
       break;
       
     case 3: // Web Portal
@@ -401,20 +403,33 @@ void runDashboardMode() {
 
 // ==================== ART FRAME MODE ====================
 void runArtFrameMode() {
-  Paint_Clear(WHITE);
-  EPD_ShowString(100, 100, (char*)"ART FRAME", 16, BLACK);
-  EPD_ShowString(100, 130, (char*)"Coming Soon!", 16, BLACK);
-  EPD_ShowString(100, 160, (char*)"Press EXIT to return", 16, BLACK);
-  EPD_Display(ImageBW);
-  EPD_PartUpdate();
+  // Update art frame display and cycle logic
+  artFrameUpdate();
   
-  while (true) {
-    buttons->update();
-    if (buttons->exit()->wasPressed() || buttons->home()->wasPressed()) {
-      returnToHome();
-      return;
-    }
-    delay(10);
+  // Small delay to prevent overwhelming the system
+  delay(20);
+  
+  // Handle input
+  bool prvPressed = buttons->prv()->wasPressed();
+  bool nextPressed = buttons->next()->wasPressed();
+  bool okPressed = buttons->ok()->wasPressed();
+  bool exitPressed = buttons->exit()->wasPressed();
+  bool homePressed = buttons->home()->wasPressed();
+  
+  if (prvPressed || nextPressed || okPressed || exitPressed || homePressed) {
+    Serial.printf("[OS] ArtFrame input: PRV=%d, NEXT=%d, OK=%d, EXIT=%d, HOME=%d\n", 
+                  prvPressed, nextPressed, okPressed, exitPressed, homePressed);
+    Serial.flush();
+  }
+  
+  artFrameHandleInput(prvPressed, nextPressed, okPressed, exitPressed);
+  
+  // Exit to home
+  if (exitPressed || homePressed) {
+    Serial.println("[OS] Exiting Art Frame to home...");
+    Serial.flush();
+    artFrameCleanup();
+    returnToHome();
   }
 }
 
