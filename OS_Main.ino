@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include "WebPortal.h"
+#include "ButtonHandler.h"
 
 // ==================== PIN DEFINITIONS ====================
 #define SCREEN_PWR 7         // Screen power pin
@@ -28,6 +29,9 @@ SPIClass SD_SPI = SPIClass(HSPI);
 
 // ==================== DISPLAY BUFFER ====================
 uint8_t ImageBW[27200];
+
+// ==================== BUTTON MANAGER ====================
+ButtonManager* buttons = nullptr;
 
 // ==================== SYSTEM STATE ====================
 enum SystemMode {
@@ -120,6 +124,9 @@ void setup() {
 
 // ==================== MAIN LOOP ====================
 void loop() {
+  // Update button states every loop
+  buttons->update();
+  
   switch (currentMode) {
     case MODE_HOME:
       if (needsRedraw) {
@@ -150,7 +157,7 @@ void loop() {
       break;
   }
   
-  delay(50);  // Small delay to prevent busy loop
+  delay(10);  // Small delay for responsiveness
 }
 
 // ==================== HARDWARE INITIALIZATION ====================
@@ -164,12 +171,9 @@ void initializeHardware() {
   
   delay(100);
   
-  // Button pins
-  pinMode(HOME_KEY, INPUT);
-  pinMode(EXIT_KEY, INPUT);
-  pinMode(PRV_KEY, INPUT);
-  pinMode(NEXT_KEY, INPUT);
-  pinMode(OK_KEY, INPUT);
+  // Initialize button handler
+  buttons = new ButtonManager(HOME_KEY, EXIT_KEY, PRV_KEY, NEXT_KEY, OK_KEY);
+  buttons->begin();
   
   Serial.println("[HW] Hardware initialized");
 }
@@ -234,45 +238,33 @@ void displayHomeScreen() {
 // ==================== HOME NAVIGATION ====================
 void handleHomeNavigation() {
   // Navigate down
-  if (digitalRead(NEXT_KEY) == 0) {
-    delay(100);
-    if (digitalRead(NEXT_KEY) == 1) {
-      selectedMenuItem++;
-      if (selectedMenuItem >= NUM_MODES) {
-        selectedMenuItem = 0;
-      }
-      needsRedraw = true;
-      Serial.printf("[HOME] Selected: %s\n", modeNames[selectedMenuItem]);
+  if (buttons->next()->wasPressed()) {
+    selectedMenuItem++;
+    if (selectedMenuItem >= NUM_MODES) {
+      selectedMenuItem = 0;
     }
+    needsRedraw = true;
+    Serial.printf("[HOME] Selected: %s\n", modeNames[selectedMenuItem]);
   }
   
   // Navigate up
-  else if (digitalRead(PRV_KEY) == 0) {
-    delay(100);
-    if (digitalRead(PRV_KEY) == 1) {
-      selectedMenuItem--;
-      if (selectedMenuItem < 0) {
-        selectedMenuItem = NUM_MODES - 1;
-      }
-      needsRedraw = true;
-      Serial.printf("[HOME] Selected: %s\n", modeNames[selectedMenuItem]);
+  else if (buttons->prv()->wasPressed()) {
+    selectedMenuItem--;
+    if (selectedMenuItem < 0) {
+      selectedMenuItem = NUM_MODES - 1;
     }
+    needsRedraw = true;
+    Serial.printf("[HOME] Selected: %s\n", modeNames[selectedMenuItem]);
   }
   
   // Select / Launch mode
-  else if (digitalRead(OK_KEY) == 0) {
-    delay(100);
-    if (digitalRead(OK_KEY) == 1) {
-      launchMode(selectedMenuItem);
-    }
+  else if (buttons->ok()->wasPressed()) {
+    launchMode(selectedMenuItem);
   }
   
   // Refresh home screen
-  else if (digitalRead(HOME_KEY) == 0) {
-    delay(100);
-    if (digitalRead(HOME_KEY) == 1) {
-      needsRedraw = true;
-    }
+  else if (buttons->home()->wasPressed()) {
+    needsRedraw = true;
   }
 }
 
@@ -408,36 +400,24 @@ void eReaderFileBrowser() {
   }
   
   // Browser navigation
-  if (digitalRead(NEXT_KEY) == 0) {
-    delay(100);
-    if (digitalRead(NEXT_KEY) == 1) {
-      if (eReaderSelectedBook < (int)eReaderBookList.size() - 1) {
-        eReaderSelectedBook++;
-        eReaderBrowserNeedsRefresh = true;
-      }
+  if (buttons->next()->wasPressed()) {
+    if (eReaderSelectedBook < (int)eReaderBookList.size() - 1) {
+      eReaderSelectedBook++;
+      eReaderBrowserNeedsRefresh = true;
     }
-  } else if (digitalRead(PRV_KEY) == 0) {
-    delay(100);
-    if (digitalRead(PRV_KEY) == 1) {
-      if (eReaderSelectedBook > 0) {
-        eReaderSelectedBook--;
-        eReaderBrowserNeedsRefresh = true;
-      }
+  } else if (buttons->prv()->wasPressed()) {
+    if (eReaderSelectedBook > 0) {
+      eReaderSelectedBook--;
+      eReaderBrowserNeedsRefresh = true;
     }
-  } else if (digitalRead(OK_KEY) == 0) {
-    delay(100);
-    if (digitalRead(OK_KEY) == 1) {
-      if (eReaderSelectedBook < (int)eReaderBookList.size()) {
-        eReaderLoadBook(eReaderBookList[eReaderSelectedBook]);
-        eReaderInBrowser = false;
-      }
+  } else if (buttons->ok()->wasPressed()) {
+    if (eReaderSelectedBook < (int)eReaderBookList.size()) {
+      eReaderLoadBook(eReaderBookList[eReaderSelectedBook]);
+      eReaderInBrowser = false;
     }
-  } else if (digitalRead(EXIT_KEY) == 0) {
-    delay(100);
-    if (digitalRead(EXIT_KEY) == 1) {
-      eReaderExit();
-      returnToHome();
-    }
+  } else if (buttons->exit()->wasPressed()) {
+    eReaderExit();
+    returnToHome();
   }
 }
 
@@ -530,42 +510,30 @@ void eReaderDisplayPage() {
 }
 
 void eReaderHandleNavigation() {
-  if (digitalRead(NEXT_KEY) == 0) {
-    delay(100);
-    if (digitalRead(NEXT_KEY) == 1) {
-      // Page down
-      size_t pageJump = (LINES_PER_PAGE - 3) * CHARS_PER_LINE;
-      eReaderCurrentPos += pageJump;
-      if (eReaderCurrentPos > eReaderFileSize) {
-        eReaderCurrentPos = eReaderFileSize;
-      }
-      eReaderCurrentPage++;
+  if (buttons->next()->wasPressed()) {
+    // Page down
+    size_t pageJump = (LINES_PER_PAGE - 3) * CHARS_PER_LINE;
+    eReaderCurrentPos += pageJump;
+    if (eReaderCurrentPos > eReaderFileSize) {
+      eReaderCurrentPos = eReaderFileSize;
     }
-  } else if (digitalRead(PRV_KEY) == 0) {
-    delay(100);
-    if (digitalRead(PRV_KEY) == 1) {
-      // Page up
-      size_t pageJump = (LINES_PER_PAGE - 3) * CHARS_PER_LINE;
-      if (eReaderCurrentPos > pageJump) {
-        eReaderCurrentPos -= pageJump;
-      } else {
-        eReaderCurrentPos = 0;
-      }
-      if (eReaderCurrentPage > 0) eReaderCurrentPage--;
+    eReaderCurrentPage++;
+  } else if (buttons->prv()->wasPressed()) {
+    // Page up
+    size_t pageJump = (LINES_PER_PAGE - 3) * CHARS_PER_LINE;
+    if (eReaderCurrentPos > pageJump) {
+      eReaderCurrentPos -= pageJump;
+    } else {
+      eReaderCurrentPos = 0;
     }
-  } else if (digitalRead(EXIT_KEY) == 0) {
-    delay(100);
-    if (digitalRead(EXIT_KEY) == 1) {
-      eReaderInBrowser = true;
-      eReaderBrowserNeedsRefresh = true;
-    }
-  } else if (digitalRead(HOME_KEY) == 0) {
-    delay(100);
-    if (digitalRead(HOME_KEY) == 1) {
-      // Return to home OS
-      eReaderExit();
-      returnToHome();
-    }
+    if (eReaderCurrentPage > 0) eReaderCurrentPage--;
+  } else if (buttons->exit()->wasPressed()) {
+    eReaderInBrowser = true;
+    eReaderBrowserNeedsRefresh = true;
+  } else if (buttons->home()->wasPressed()) {
+    // Return to home OS
+    eReaderExit();
+    returnToHome();
   }
 }
 
@@ -587,14 +555,12 @@ void runDashboardMode() {
   EPD_PartUpdate();
   
   while (true) {
-    if (digitalRead(EXIT_KEY) == 0) {
-      delay(100);
-      if (digitalRead(EXIT_KEY) == 1) {
-        returnToHome();
-        return;
-      }
+    buttons->update();
+    if (buttons->exit()->wasPressed() || buttons->home()->wasPressed()) {
+      returnToHome();
+      return;
     }
-    delay(50);
+    delay(10);
   }
 }
 
@@ -608,14 +574,12 @@ void runArtFrameMode() {
   EPD_PartUpdate();
   
   while (true) {
-    if (digitalRead(EXIT_KEY) == 0) {
-      delay(100);
-      if (digitalRead(EXIT_KEY) == 1) {
-        returnToHome();
-        return;
-      }
+    buttons->update();
+    if (buttons->exit()->wasPressed() || buttons->home()->wasPressed()) {
+      returnToHome();
+      return;
     }
-    delay(50);
+    delay(10);
   }
 }
 
@@ -639,29 +603,18 @@ void runWebPortalMode() {
   
   // Main portal loop
   while (true) {
+    // Update buttons
+    buttons->update();
+    
     // Handle web server requests
     webPortalUpdate();
     
-    // Check for EXIT button
-    if (digitalRead(EXIT_KEY) == 0) {
-      delay(100);
-      if (digitalRead(EXIT_KEY) == 1) {
-        Serial.println("[PORTAL] EXIT pressed, stopping portal");
-        webPortalStop();
-        returnToHome();
-        return;
-      }
-    }
-    
-    // Check for HOME button
-    if (digitalRead(HOME_KEY) == 0) {
-      delay(100);
-      if (digitalRead(HOME_KEY) == 1) {
-        Serial.println("[PORTAL] HOME pressed, stopping portal");
-        webPortalStop();
-        returnToHome();
-        return;
-      }
+    // Check for EXIT or HOME button
+    if (buttons->exit()->wasPressed() || buttons->home()->wasPressed()) {
+      Serial.println("[PORTAL] Exit button pressed, stopping portal");
+      webPortalStop();
+      returnToHome();
+      return;
     }
     
     delay(10);  // Small delay for server handling
@@ -678,14 +631,12 @@ void runSettingsMode() {
   EPD_PartUpdate();
   
   while (true) {
-    if (digitalRead(EXIT_KEY) == 0) {
-      delay(100);
-      if (digitalRead(EXIT_KEY) == 1) {
-        returnToHome();
-        return;
-      }
+    buttons->update();
+    if (buttons->exit()->wasPressed() || buttons->home()->wasPressed()) {
+      returnToHome();
+      return;
     }
-    delay(50);
+    delay(10);
   }
 }
 
