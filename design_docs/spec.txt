@@ -1,37 +1,71 @@
 Project Blueprint: ESP32 E-Ink Smart Reader & Dashboard
-1. Hardware Bill of Materials (BOM)
-Core Board & Display: ELECROW CrowPanel ESP32 5.79" E-paper HMI Display
-Specs: ESP32-S3 chip, 8MB Flash, 8MB PSRAM, Wi-Fi/Bluetooth, 272x792 Resolution.
-Controls: Rotary Dial Switch (Up/Down/Push), Menu, Back, Boot, Reset.
-Power: 1500 mAh 3.7V LiPo Battery (connects to onboard SH1.0-2P battery terminal).
-Storage: 32GB Micro SD Card (Formatted to FAT32).
-2. Core Operational Modes
-The device will utilize the physical rotary dial and buttons to navigate between the following primary modes:
-E-Reader Mode: Reads .txt or basic .epub files from the SD card. The rotary dial will be used to scroll up/down or page back/forth.
-Smart Dashboard Mode: Connects to Wi-Fi to fetch and display the current time, date, local weather forecast, and maybe a daily quote.
-Art / Wallpaper Mode: Randomly pulls an image from a specific "Art" folder on the SD card and displays it. E-ink uses zero power to hold an image, so it acts like a physical framed picture.
-Web Portal Mode: Turns the ESP32 into a Wi-Fi Access Point (or connects to your home network) and hosts a simple webpage. You can navigate to the device's IP address on your phone/PC to upload new books, articles, or images directly to the SD card.
-3. Additional Feature Ideas (Brainstorming)
-Since the ESP32 has Wi-Fi and Bluetooth, you can easily expand its capabilities:
-RSS News Ticker: Automatically wake up every morning, fetch headlines from your favorite news sites, and display them for you to read over coffee.
-Kitchen Recipe Display: Use the web portal to cast a recipe to the screen. Because of the e-ink screen, it won't time out or turn off while your hands are covered in flour.
-To-Do List / Calendar: Sync with a Google Calendar API or Todoist to display your daily agenda.
-Pomodoro Timer: Use the rotary dial to set a 25-minute work timer. The screen updates every minute, keeping you off your phone.
-Offline Wikipedia / Documentation: Store compressed API docs or reference sheets on the 32GB SD card to read without distractions.
-4. Software & Architecture Setup (Arduino IDE)
-Development Environment: Arduino IDE (Board: ESP32S3 Dev Module).
-Partition Scheme: "HUGE APP (3MB No OTA / 1MB SPIFFS)" to accommodate the web server and display libraries.
-Memory Setup: Ensure "OPI PSRAM" is enabled in Arduino IDE settings to utilize the 8MB PSRAM for handling large image/text files.
-Key Libraries Needed:
-WiFi.h and WebServer.h (For the file upload portal).
-SD.h or SD_MMC.h (For interfacing with the MicroSD card).
-ArduinoJson.h (For parsing weather/API data).
-Elecrow's provided driver libraries for the SSD1683 (dual driver configuration used by this specific screen).
-5. Power Management Strategy
-To get months of use out of your 1500mAh battery, power management is critical:
-Deep Sleep: The ESP32 should almost always be in Deep Sleep mode.
-Wake Sources: The ESP32 will be programmed to wake up under two conditions:
-Timer Wakeup: Wake up every X hours to refresh the weather/time or grab a new RSS feed, then immediately go back to sleep.
-External Wakeup (ext0/ext1): Wake up when a physical button or the rotary dial is interacted with (e.g., when you pick it up to read a book).
-Wi-Fi Management: Wi-Fi consumes massive amounts of power. It should only be turned on momentarily to fetch data (Dashboard mode) or when explicitly put into "Web Portal Mode" for uploading files.
 
+1. Hardware Bill of Materials (BOM)
+
+Core Board & Display: ELECROW CrowPanel ESP32 5.79" E-paper HMI Display
+
+Specs: ESP32-S3 chip, 8MB Flash, 8MB PSRAM, Wi-Fi/Bluetooth, 272x792 Resolution.
+
+Controls: Rotary Dial Switch (Up/Down/Push), Menu, Back, Boot, Reset.
+
+Power: 1500 mAh 3.7V LiPo Battery (connects to onboard SH1.0-2P battery terminal).
+
+Storage: 32GB Micro SD Card (Formatted to FAT32).
+
+2. Core Operational Modes
+
+The device will utilize the physical rotary dial and buttons to navigate between the following primary modes:
+
+E-Reader Mode: Reads .txt or basic .epub files from the SD card. The rotary dial will be used to scroll up/down or page back/forth.
+
+Smart Dashboard Mode: Connects to Wi-Fi to fetch and display the current time, date, local weather forecast, and maybe a daily quote.
+
+Art / Wallpaper Mode: Randomly pulls an image from a specific "Art" folder on the SD card and displays it. E-ink uses zero power to hold an image, so it acts like a physical framed picture.
+
+Web Portal Mode: Turns the ESP32 into a Wi-Fi Access Point (or connects to your home network) and hosts a simple webpage. You can navigate to the device's IP address on your phone/PC to upload new books, articles, or images directly to the SD card.
+
+3. Additional Feature Ideas (Brainstorming)
+
+Since the ESP32 has Wi-Fi and Bluetooth, you can easily expand its capabilities:
+
+RSS News Ticker: Automatically wake up every morning, fetch headlines from your favorite news sites, and display them for you to read over coffee.
+
+Kitchen Recipe Display: Use the web portal to cast a recipe to the screen. Because of the e-ink screen, it won't time out or turn off while your hands are covered in flour.
+
+To-Do List / Calendar: Sync with a Google Calendar API or Todoist to display your daily agenda.
+
+Pomodoro Timer: Use the rotary dial to set a 25-minute work timer. The screen updates every minute, keeping you off your phone.
+
+Offline Wikipedia / Documentation: Store compressed API docs or reference sheets on the 32GB SD card to read without distractions.
+
+4. Software & Architecture Setup (Arduino IDE)
+
+Development Environment: Arduino IDE (Board: ESP32S3 Dev Module).
+
+Partition Scheme: "HUGE APP (3MB No OTA / 1MB SPIFFS)" to accommodate the web server and display libraries.
+
+Memory Setup: Ensure "OPI PSRAM" is enabled in Arduino IDE settings to utilize the 8MB PSRAM for handling large image/text files.
+
+Key Libraries Needed:
+
+WiFi.h and WebServer.h (For the file upload portal).
+
+SD.h or SD_MMC.h (For interfacing with the MicroSD card).
+
+ArduinoJson.h (For parsing weather/API data).
+
+Elecrow's provided driver libraries for the SSD1683 (dual driver configuration used by this specific screen).
+
+5. Power Management Strategy
+
+To get months of use out of your 1500mAh battery, power management is critical:
+
+Deep Sleep: The ESP32 should almost always be in Deep Sleep mode.
+
+Wake Sources: The ESP32 will be programmed to wake up under two conditions:
+
+Timer Wakeup: Wake up every X hours to refresh the weather/time or grab a new RSS feed, then immediately go back to sleep.
+
+External Wakeup (ext0/ext1): Wake up when a physical button or the rotary dial is interacted with (e.g., when you pick it up to read a book).
+
+Wi-Fi Management: Wi-Fi consumes massive amounts of power. It should only be turned on momentarily to fetch data (Dashboard mode) or when explicitly put into "Web Portal Mode" for uploading files.

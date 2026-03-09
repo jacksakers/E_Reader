@@ -19,11 +19,11 @@
 SPIClass SD_SPI = SPIClass(HSPI);
 
 // ==================== DISPLAY PARAMETERS ====================
-#define DISPLAY_WIDTH EPD_W  // 792 pixels
+#define DISPLAY_WIDTH EPD_W  // 800 pixels (buffer width for dual drivers)
 #define DISPLAY_HEIGHT EPD_H // 272 pixels
 #define FONT_WIDTH 8         // Character width for 16pt font
 #define FONT_HEIGHT 16       // Character height for 16pt font
-#define CHARS_PER_LINE 50    // Safe buffer size for EPD_ShowString
+#define CHARS_PER_LINE 99    // 792 usable pixels / 8 pixels per char = 99 chars (spans both drivers)
 #define LINES_PER_PAGE (DISPLAY_HEIGHT / FONT_HEIGHT) // ~17 lines
 
 // ==================== BUFFER & STATE ====================
@@ -320,7 +320,7 @@ void displayPage() {
     Serial.printf("displayPage: Loop %d, lineCount=%d, pos=%d\n", loopCount, lineCount, pos);
     
     // Extract one line of text - use stack-allocated buffer
-    char lineBuffer[51];  // 50 chars + null terminator
+    char lineBuffer[100];  // 99 chars + null terminator
     int charCount = 0;
     
     Serial.println("displayPage: About to read line");
