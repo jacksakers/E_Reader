@@ -93,6 +93,9 @@ namespace SettingsNS {
 
 // ==================== SETTINGS PERSISTENCE ====================
 
+// Forward declaration
+bool saveSettings();
+
 // Parse a settings line
 bool parseSettingsLine(const char* line) {
   using namespace SettingsNS;
@@ -100,7 +103,7 @@ bool parseSettingsLine(const char* line) {
   if (line == NULL || strlen(line) < 3) return false;
   
   char key[64];
-  char value[128];
+  char valueBuffer[128];
   
   // Simple key=value parser
   const char* equals = strchr(line, '=');
@@ -111,10 +114,11 @@ bool parseSettingsLine(const char* line) {
   strncpy(key, line, keyLen);
   key[keyLen] = '\0';
   
-  strncpy(value, equals + 1, sizeof(value) - 1);
-  value[sizeof(value) - 1] = '\0';
+  strncpy(valueBuffer, equals + 1, sizeof(valueBuffer) - 1);
+  valueBuffer[sizeof(valueBuffer) - 1] = '\0';
   
-  // Trim whitespace
+  // Trim whitespace using a pointer
+  char* value = valueBuffer;
   while (*value == ' ' || *value == '\t' || *value == '\r' || *value == '\n') value++;
   int vLen = strlen(value);
   while (vLen > 0 && (value[vLen-1] == ' ' || value[vLen-1] == '\t' || value[vLen-1] == '\r' || value[vLen-1] == '\n')) {

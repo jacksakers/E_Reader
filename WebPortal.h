@@ -602,8 +602,6 @@ bool webPortalInit() {
   char ipLine[50];
   sprintf(ipLine, "IP: %s", ipStr.c_str());
   
-  int wifiMode = settingsGetWiFiMode();
-  
   if (wifiMode == 1) {
     // AP Mode
     char ssidLine[50];
