@@ -11,19 +11,25 @@
 #define KITTALIEN_MIN_STAT 0
 
 // Decay rates (per hour of real time)
-#define KITTALIEN_HUNGER_DECAY_RATE 5     // Hunger decreases by 5 per hour
-#define KITTALIEN_HAPPINESS_DECAY_RATE 3  // Happiness decreases by 3 per hour
-#define KITTALIEN_ENERGY_DECAY_RATE 2     // Energy decreases by 2 per hour
+#define KITTALIEN_HUNGER_DECAY_RATE 10     // Hunger decreases by 5 per hour
+#define KITTALIEN_HAPPINESS_DECAY_RATE 5  // Happiness decreases by 3 per hour
+#define KITTALIEN_ENERGY_DECAY_RATE 10     // Energy decreases by 2 per hour
 
 // Action effects
-#define KITTALIEN_FEED_AMOUNT 25
-#define KITTALIEN_PLAY_HAPPINESS 20
-#define KITTALIEN_PLAY_ENERGY_COST 15
+#define KITTALIEN_FEED_AMOUNT 10
+#define KITTALIEN_PLAY_HAPPINESS 15
+#define KITTALIEN_PLAY_ENERGY_COST 20
 #define KITTALIEN_PET_HAPPINESS 10
-#define KITTALIEN_SLEEP_ENERGY 40
+
+// Energy mechanics
+#define KITTALIEN_CRAZY_THRESHOLD 85      // Energy above this = crazy (player must play)
+#define KITTALIEN_SLEEP_THRESHOLD 30      // Energy below this = auto sleep
+#define KITTALIEN_WAKEUP_THRESHOLD 60     // Energy above this = wake up
+#define KITTALIEN_SLEEP_REGEN_RATE 30     // Energy regained per hour while sleeping
 
 // UI Configuration
 #define KITTALIEN_UI_TIMEOUT 5000         // Show action result for 5 seconds
+#define KITTALIEN_ACTION_IMAGE_TIMEOUT 10000  // Show action image for 10 seconds
 
 // Reference to global display buffer from OS_Main.ino
 extern uint8_t ImageBW[27200];
@@ -35,9 +41,10 @@ namespace KittalienNS {
   enum PetState {
     STATE_SICK,      // Hunger < 20
     STATE_SAD,       // Happiness < 30
-    STATE_SLEEPING,  // After Sleep action
+    STATE_SLEEPING,  // Auto-sleep when energy < KITTALIEN_SLEEP_THRESHOLD
     STATE_HAPPY,     // Happiness > 70 && Hunger > 50
-    STATE_NEUTRAL    // Default
+    STATE_NEUTRAL,   // Default
+    STATE_CRAZY      // Energy > KITTALIEN_CRAZY_THRESHOLD (must play)
   };
   
   // Available actions
@@ -45,7 +52,6 @@ namespace KittalienNS {
     ACTION_FEED,
     ACTION_PLAY,
     ACTION_PET,
-    ACTION_SLEEP,
     ACTION_COUNT
   };
   
@@ -57,6 +63,7 @@ namespace KittalienNS {
     unsigned long lastUpdateTime;  // Timestamp in seconds since epoch
     PetState currentState;
     bool isNewPet;        // First time initialization
+    bool isSleeping;      // True when kittalien is auto-sleeping
   };
   
   // Game state
@@ -66,6 +73,11 @@ namespace KittalienNS {
   static String statusMessage = "";
   static unsigned long messageDisplayTime = 0;
   static bool showingMessage = false;
+
+  // Action image state
+  static String actionImage = "";
+  static bool showingActionImage = false;
+  static unsigned long actionImageStartTime = 0;
   
   // Art filenames for different states
   static const char* stateImages[] = {
@@ -73,23 +85,22 @@ namespace KittalienNS {
     "sad_kittalien.art",       // STATE_SAD
     "sleeping_kittalien.art",  // STATE_SLEEPING
     "happy_kittalien.art",     // STATE_HAPPY
-    "neutral_kittalien.art"    // STATE_NEUTRAL
+    "neutral_kittalien.art",   // STATE_NEUTRAL
+    "crazy_kittalien.art"      // STATE_CRAZY
   };
   
   // Action names
   static const char* actionNames[] = {
     "Feed",
     "Play",
-    "Pet",
-    "Sleep"
+    "Pet"
   };
   
   // Action descriptions
   static const char* actionDescriptions[] = {
     "Give food (+Hunger)",
     "Play game (+Happy, -Energy)",
-    "Pet gently (+Happy)",
-    "Take a nap (+Energy)"
+    "Pet gently (+Happy)"
   };
 }
 
@@ -137,6 +148,7 @@ bool savePetState() {
   file.printf("lastUpdateTime=%lu\n", pet.lastUpdateTime);
   file.printf("currentState=%d\n", (int)pet.currentState);
   file.printf("isNewPet=%d\n", pet.isNewPet ? 0 : 1);
+  file.printf("isSleeping=%d\n", pet.isSleeping ? 1 : 0);
   
   file.close();
   
@@ -161,6 +173,7 @@ bool loadPetState() {
     pet.lastUpdateTime = getCurrentTimeSeconds();
     pet.currentState = STATE_NEUTRAL;
     pet.isNewPet = true;
+    pet.isSleeping = false;
     
     return savePetState();
   }
@@ -197,6 +210,8 @@ bool loadPetState() {
         pet.currentState = (PetState)atoi(value);
       } else if (strcmp(key, "isNewPet") == 0) {
         pet.isNewPet = (atoi(value) == 0);
+      } else if (strcmp(key, "isSleeping") == 0) {
+        pet.isSleeping = (atoi(value) == 1);
       }
     }
   }
@@ -238,23 +253,29 @@ void applyTimeDecay() {
   // Apply decay
   int hungerDecay = (int)(hoursPassed * KITTALIEN_HUNGER_DECAY_RATE);
   int happinessDecay = (int)(hoursPassed * KITTALIEN_HAPPINESS_DECAY_RATE);
-  int energyDecay = (int)(hoursPassed * KITTALIEN_ENERGY_DECAY_RATE);
-  
+
   pet.hunger -= hungerDecay;
   pet.happiness -= happinessDecay;
-  pet.energy -= energyDecay;
-  
+
+  // Energy regenerates while sleeping, decays while awake
+  if (pet.isSleeping) {
+    int energyRegen = (int)(hoursPassed * KITTALIEN_SLEEP_REGEN_RATE);
+    pet.energy += energyRegen;
+  } else {
+    int energyDecay = (int)(hoursPassed * KITTALIEN_ENERGY_DECAY_RATE);
+    pet.energy -= energyDecay;
+  }
+
   // Clamp stats
   pet.hunger = clamp(pet.hunger, KITTALIEN_MIN_STAT, KITTALIEN_MAX_STAT);
   pet.happiness = clamp(pet.happiness, KITTALIEN_MIN_STAT, KITTALIEN_MAX_STAT);
   pet.energy = clamp(pet.energy, KITTALIEN_MIN_STAT, KITTALIEN_MAX_STAT);
-  
+
   // Update timestamp
   pet.lastUpdateTime = currentTime;
-  
-  Serial.printf("[KITTALIEN] After decay: H=%d (-%d), Ha=%d (-%d), E=%d (-%d)\n",
-                pet.hunger, hungerDecay, pet.happiness, happinessDecay, 
-                pet.energy, energyDecay);
+
+  Serial.printf("[KITTALIEN] After decay: H=%d, Ha=%d, E=%d (sleeping=%d)\n",
+                pet.hunger, pet.happiness, pet.energy, pet.isSleeping ? 1 : 0);
   
   // Save immediately after decay
   savePetState();
@@ -266,9 +287,26 @@ void updatePetState() {
   using namespace KittalienNS;
   
   PetState oldState = pet.currentState;
-  
+  bool wasSleeping = pet.isSleeping;
+
+  // Auto-sleep when energy too low
+  if (!pet.isSleeping && pet.energy < KITTALIEN_SLEEP_THRESHOLD) {
+    pet.isSleeping = true;
+    Serial.println("[KITTALIEN] Fell asleep (low energy)");
+  }
+
+  // Wake up when energy is restored
+  if (pet.isSleeping && pet.energy >= KITTALIEN_WAKEUP_THRESHOLD) {
+    pet.isSleeping = false;
+    Serial.println("[KITTALIEN] Woke up (energy restored)");
+  }
+
   // Determine state based on stats (priority order)
-  if (pet.hunger < 20) {
+  if (pet.isSleeping) {
+    pet.currentState = STATE_SLEEPING;
+  } else if (pet.energy > KITTALIEN_CRAZY_THRESHOLD) {
+    pet.currentState = STATE_CRAZY;
+  } else if (pet.hunger < 20) {
     pet.currentState = STATE_SICK;
   } else if (pet.happiness < 30) {
     pet.currentState = STATE_SAD;
@@ -277,11 +315,16 @@ void updatePetState() {
   } else {
     pet.currentState = STATE_NEUTRAL;
   }
-  
+
   // If state changed, trigger refresh
   if (oldState != pet.currentState) {
     Serial.printf("[KITTALIEN] State changed: %d -> %d\n", oldState, pet.currentState);
     needsRefresh = true;
+  }
+
+  // Save if sleeping state changed
+  if (pet.isSleeping != wasSleeping) {
+    savePetState();
   }
 }
 
@@ -297,10 +340,15 @@ void executeAction(KittalienNS::Action action) {
       pet.hunger += KITTALIEN_FEED_AMOUNT;
       pet.hunger = clamp(pet.hunger, KITTALIEN_MIN_STAT, KITTALIEN_MAX_STAT);
       statusMessage = "Fed Kittalien! (+Hunger)";
+      actionImage = "eating_kittalien.art";
+      showingActionImage = true;
+      actionImageStartTime = millis();
       break;
-      
+
     case ACTION_PLAY:
-      if (pet.energy < KITTALIEN_PLAY_ENERGY_COST) {
+      if (pet.isSleeping) {
+        statusMessage = "Kittalien is asleep!";
+      } else if (pet.energy < KITTALIEN_PLAY_ENERGY_COST) {
         statusMessage = "Too tired to play!";
       } else {
         pet.happiness += KITTALIEN_PLAY_HAPPINESS;
@@ -308,21 +356,19 @@ void executeAction(KittalienNS::Action action) {
         pet.happiness = clamp(pet.happiness, KITTALIEN_MIN_STAT, KITTALIEN_MAX_STAT);
         pet.energy = clamp(pet.energy, KITTALIEN_MIN_STAT, KITTALIEN_MAX_STAT);
         statusMessage = "Played fun game! (+Happy, -Energy)";
+        actionImage = "playing_kittalien.art";
+        showingActionImage = true;
+        actionImageStartTime = millis();
       }
       break;
-      
+
     case ACTION_PET:
       pet.happiness += KITTALIEN_PET_HAPPINESS;
       pet.happiness = clamp(pet.happiness, KITTALIEN_MIN_STAT, KITTALIEN_MAX_STAT);
       statusMessage = "Petted softly! (+Happy)";
-      break;
-      
-    case ACTION_SLEEP:
-      pet.energy += KITTALIEN_SLEEP_ENERGY;
-      pet.energy = clamp(pet.energy, KITTALIEN_MIN_STAT, KITTALIEN_MAX_STAT);
-      pet.currentState = STATE_SLEEPING;
-      statusMessage = "Taking a nap... (+Energy)";
-      needsRefresh = true; // Force immediate state update
+      actionImage = "pet_kittalien.art";
+      showingActionImage = true;
+      actionImageStartTime = millis();
       break;
   }
   
@@ -343,44 +389,46 @@ void executeAction(KittalienNS::Action action) {
 
 // ==================== IMAGE LOADING ====================
 
-bool loadPetImage(KittalienNS::PetState state) {
-  using namespace KittalienNS;
-  
-  // Get filename for current state
-  String filepath = "/art/" + String(stateImages[(int)state]);
+bool loadArtFile(const char* filename) {
+  String filepath = "/art/" + String(filename);
   Serial.printf("[KITTALIEN] Loading image: %s\n", filepath.c_str());
-  
-  // Check if file exists
+
   if (!SD.exists(filepath)) {
     Serial.printf("[KITTALIEN] Image not found: %s\n", filepath.c_str());
-    // Try neutral as fallback
-    if (state != STATE_NEUTRAL) {
-      Serial.println("[KITTALIEN] Falling back to neutral state");
-      return loadPetImage(STATE_NEUTRAL);
-    }
     return false;
   }
-  
-  // Open file
+
   File artFile = SD.open(filepath, FILE_READ);
   if (!artFile) {
     Serial.println("[KITTALIEN] Failed to open image file");
     return false;
   }
-  
-  // Read image data into buffer
+
   size_t fileSize = artFile.size();
   size_t bytesToRead = min(fileSize, (size_t)27200);
   size_t bytesRead = artFile.read(ImageBW, bytesToRead);
   artFile.close();
-  
+
   if (bytesRead != bytesToRead) {
-    Serial.printf("[KITTALIEN] Read error: expected %d, got %d bytes\n", 
+    Serial.printf("[KITTALIEN] Read error: expected %d, got %d bytes\n",
                   bytesToRead, bytesRead);
     return false;
   }
-  
+
   Serial.printf("[KITTALIEN] Successfully loaded %d bytes\n", bytesRead);
+  return true;
+}
+
+bool loadPetImage(KittalienNS::PetState state) {
+  using namespace KittalienNS;
+
+  if (!loadArtFile(stateImages[(int)state])) {
+    if (state != STATE_NEUTRAL) {
+      Serial.println("[KITTALIEN] Falling back to neutral state");
+      return loadArtFile(stateImages[(int)STATE_NEUTRAL]);
+    }
+    return false;
+  }
   return true;
 }
 
@@ -420,13 +468,23 @@ void kittalienDrawScreen() {
   Serial.println("[KITTALIEN] Drawing screen...");
   
   // Load and display the pet image (full screen background)
-  if (!loadPetImage(pet.currentState)) {
+  bool imageLoaded = false;
+  if (showingActionImage && actionImage.length() > 0) {
+    imageLoaded = loadArtFile(actionImage.c_str());
+    if (!imageLoaded) {
+      Serial.printf("[KITTALIEN] Action image not found: %s\n", actionImage.c_str());
+    }
+  }
+  if (!imageLoaded) {
+    imageLoaded = loadPetImage(pet.currentState);
+  }
+  if (!imageLoaded) {
     // If image loading fails, just clear the screen
     Paint_NewImage(ImageBW, EPD_W, EPD_H, Rotation, WHITE);
     Paint_Clear(WHITE);
     EPD_ShowString(200, 120, "Image not found!", 24, BLACK);
   }
-  
+
   // Initialize paint system (this sets up proper drawing on top of the loaded image)
   Paint_NewImage(ImageBW, EPD_W, EPD_H, Rotation, WHITE);
   
@@ -556,23 +614,35 @@ void kittalienHandleInput(bool upPressed, bool downPressed, bool okPressed, bool
 
 void kittalienUpdate() {
   using namespace KittalienNS;
-  
+
+  unsigned long currentTime = millis();
+
   // Hide message after timeout
   if (showingMessage) {
-    unsigned long currentTime = millis();
-    
     // Handle millis() overflow
     if (currentTime < messageDisplayTime) {
       messageDisplayTime = currentTime;
     }
-    
     if (currentTime - messageDisplayTime >= KITTALIEN_UI_TIMEOUT) {
       showingMessage = false;
       needsRefresh = true;
       Serial.println("[KITTALIEN] Hiding status message");
     }
   }
-  
+
+  // Hide action image after timeout
+  if (showingActionImage) {
+    // Handle millis() overflow
+    if (currentTime < actionImageStartTime) {
+      actionImageStartTime = currentTime;
+    }
+    if (currentTime - actionImageStartTime >= KITTALIEN_ACTION_IMAGE_TIMEOUT) {
+      showingActionImage = false;
+      needsRefresh = true;
+      Serial.println("[KITTALIEN] Hiding action image");
+    }
+  }
+
   // Redraw if needed
   if (needsRefresh) {
     kittalienDrawScreen();
@@ -609,6 +679,7 @@ void kittalienInit() {
   selectedAction = 0;
   needsRefresh = true;
   showingMessage = false;
+  showingActionImage = false;
   
   // Show welcome message for new pets
   if (pet.isNewPet) {
@@ -661,6 +732,7 @@ void kittalienPrintStats() {
   Serial.printf("Happiness: %d / %d\n", pet.happiness, KITTALIEN_MAX_STAT);
   Serial.printf("Energy:    %d / %d\n", pet.energy, KITTALIEN_MAX_STAT);
   Serial.printf("State:     %d\n", (int)pet.currentState);
+  Serial.printf("Sleeping:  %s\n", pet.isSleeping ? "yes" : "no");
   Serial.printf("Last Time: %lu seconds\n", pet.lastUpdateTime);
   Serial.println("====================================");
 }
