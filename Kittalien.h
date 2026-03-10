@@ -30,6 +30,7 @@
 // UI Configuration
 #define KITTALIEN_UI_TIMEOUT 5000         // Show action result for 5 seconds
 #define KITTALIEN_ACTION_IMAGE_TIMEOUT 10000  // Show action image for 10 seconds
+#define KITTALIEN_MAX_NAME_LENGTH 16           // Max length of pet name (e.g. "Ka-ray")
 
 // Reference to global display buffer from OS_Main.ino
 extern uint8_t ImageBW[27200];
@@ -62,6 +63,7 @@ namespace KittalienNS {
     int energy;           // 0-100
     unsigned long lastUpdateTime;  // Timestamp in seconds since epoch
     PetState currentState;
+    char name[KITTALIEN_MAX_NAME_LENGTH];  // Randomized pet name
     bool isNewPet;        // First time initialization
     bool isSleeping;      // True when kittalien is auto-sleeping
   };
@@ -102,6 +104,16 @@ namespace KittalienNS {
     "Play game (+Happy, -Energy)",
     "Pet gently (+Happy)"
   };
+  
+  // Name generation syllables
+  static const char* nameFirstParts[] = {
+    "Qu", "Ka", "No", "Zu", "Mi", "Bo", "Re", "Ty", "Xa", "Pi",
+    "Lu", "Fo", "Di", "Ve", "Co", "Wa", "Na", "Ge", "Ru", "Se"
+  };
+  static const char* nameSecondParts[] = {
+    "ade", "ray", "jo", "kin", "lix", "mur", "pro", "zel", "via", "dex",
+    "sol", "fin", "mox", "ren", "tis", "vor", "bix", "dun", "pan", "sky"
+  };
 }
 
 // ==================== HELPER FUNCTIONS ====================
@@ -120,6 +132,15 @@ unsigned long getCurrentTimeSeconds() {
   // WARNING: This resets when the device reboots!
   // For production, integrate DS3231 RTC or NTP time sync
   return millis() / 1000UL;
+}
+
+// ==================== NAME GENERATION ====================
+
+void generateKittalienName(char* outName, size_t maxLen) {
+  using namespace KittalienNS;
+  int firstIdx = random(0, 20);
+  int secondIdx = random(0, 20);
+  snprintf(outName, maxLen, "%s-%s", nameFirstParts[firstIdx], nameSecondParts[secondIdx]);
 }
 
 // ==================== SAVE/LOAD FUNCTIONS ====================
@@ -149,6 +170,7 @@ bool savePetState() {
   file.printf("currentState=%d\n", (int)pet.currentState);
   file.printf("isNewPet=%d\n", pet.isNewPet ? 0 : 1);
   file.printf("isSleeping=%d\n", pet.isSleeping ? 1 : 0);
+  file.printf("name=%s\n", pet.name);
   
   file.close();
   
@@ -174,6 +196,7 @@ bool loadPetState() {
     pet.currentState = STATE_NEUTRAL;
     pet.isNewPet = true;
     pet.isSleeping = false;
+    generateKittalienName(pet.name, KITTALIEN_MAX_NAME_LENGTH);
     
     return savePetState();
   }
@@ -185,6 +208,9 @@ bool loadPetState() {
     return false;
   }
   
+  // Initialize name in case it is absent from older save files
+  pet.name[0] = '\0';
+
   // Parse save data
   char line[128];
   while (file.available()) {
@@ -212,11 +238,20 @@ bool loadPetState() {
         pet.isNewPet = (atoi(value) == 0);
       } else if (strcmp(key, "isSleeping") == 0) {
         pet.isSleeping = (atoi(value) == 1);
+      } else if (strcmp(key, "name") == 0) {
+        strncpy(pet.name, value, KITTALIEN_MAX_NAME_LENGTH - 1);
+        pet.name[KITTALIEN_MAX_NAME_LENGTH - 1] = '\0';
       }
     }
   }
   
   file.close();
+
+  // If name was absent from an older save file, generate one now
+  if (pet.name[0] == '\0') {
+    generateKittalienName(pet.name, KITTALIEN_MAX_NAME_LENGTH);
+    Serial.printf("[KITTALIEN] Generated name for existing pet: %s\n", pet.name);
+  }
   
   Serial.printf("[KITTALIEN] Loaded: H=%d, Ha=%d, E=%d, Time=%lu\n", 
                 pet.hunger, pet.happiness, pet.energy, pet.lastUpdateTime);
@@ -496,7 +531,7 @@ void kittalienDrawScreen() {
   }
   
   // Title
-  EPD_ShowString(320, 5, "KITTALIEN", 24, BLACK);
+  EPD_ShowString(320, 5, (char*)pet.name, 24, BLACK);
   
   // Draw stat bars
   drawStatBar(20, 35, "Hunger:  ", pet.hunger, KITTALIEN_MAX_STAT);
@@ -719,6 +754,7 @@ void kittalienResetPet() {
   pet.energy = 80;
   pet.lastUpdateTime = getCurrentTimeSeconds();
   pet.isNewPet = true;
+  generateKittalienName(pet.name, KITTALIEN_MAX_NAME_LENGTH);
   savePetState();
   needsRefresh = true;
 }
@@ -735,6 +771,22 @@ void kittalienPrintStats() {
   Serial.printf("Sleeping:  %s\n", pet.isSleeping ? "yes" : "no");
   Serial.printf("Last Time: %lu seconds\n", pet.lastUpdateTime);
   Serial.println("====================================");
+}
+
+const char* kittalienGetName() {
+  using namespace KittalienNS;
+  if (pet.name[0] == '\0') {
+    loadPetState();
+  }
+  return pet.name;
+}
+
+void kittalienRandomizeName() {
+  using namespace KittalienNS;
+  generateKittalienName(pet.name, KITTALIEN_MAX_NAME_LENGTH);
+  savePetState();
+  needsRefresh = true;
+  Serial.printf("[KITTALIEN] New name: %s\n", pet.name);
 }
 
 #endif // KITTALIEN_H

@@ -75,7 +75,8 @@ namespace SettingsNS {
     SETTINGS_POWER_OPTIONS,
     SETTINGS_WIFI_OPTIONS,
     SETTINGS_EREADER_OPTIONS,
-    SETTINGS_ARTFRAME_OPTIONS
+    SETTINGS_ARTFRAME_OPTIONS,
+    SETTINGS_KITTALIEN_OPTIONS
   };
   
   static SettingsMode currentMode = SETTINGS_MAIN_MENU;
@@ -91,12 +92,18 @@ namespace SettingsNS {
   static String currentPath = "";
   static bool confirmDelete = false;
   static String fileToDelete = "";
+  static bool confirmKittalienReset = false;
 }
 
 // ==================== SETTINGS PERSISTENCE ====================
 
-// Forward declaration
+// Forward declarations
 bool saveSettings();
+
+// Kittalien functions used in settings (defined in Kittalien.h, included after Settings.h)
+void kittalienResetPet();
+void kittalienRandomizeName();
+const char* kittalienGetName();
 
 // Parse a settings line
 bool parseSettingsLine(const char* line) {
@@ -335,9 +342,10 @@ void settingsDrawMainMenu() {
     "WiFi Options",
     "E-Reader Options",
     "Art Frame Options",
+    "Kittalien Options",
     "Save & Exit"
   };
-  const int numItems = 8;
+  const int numItems = 9;
   
   int startY = 45;
   int itemHeight = 25;
@@ -669,6 +677,59 @@ void settingsDrawWiFiOptions() {
   needsRefresh = false;
 }
 
+// ==================== KITTALIEN OPTIONS ====================
+
+void settingsDrawKittalienOptions() {
+  using namespace SettingsNS;
+
+  Paint_Clear(WHITE);
+  settingsDrawHeader("Kittalien Options");
+
+  int startY = 45;
+  int lineHeight = 30;
+  int line = 0;
+
+  char nameText[32];
+  snprintf(nameText, sizeof(nameText), "Name: %s", kittalienGetName());
+  EPD_ShowString(15, startY + (line++ * lineHeight), nameText, 16, BLACK);
+  line++; // spacing
+
+  settingsDrawItem(0, startY + (line * lineHeight), "Randomize Name", false);
+  line++;
+
+  settingsDrawItem(1, startY + (line * lineHeight), "Reset Pet (Wipe Data)", false);
+  line++;
+
+  settingsDrawItem(2, startY + (line * lineHeight), "Back to Main Menu", false);
+
+  settingsDrawFooter("UP/DOWN: Navigate  OK: Select  EXIT: Back");
+
+  EPD_Display(ImageBW);
+  EPD_PartUpdate();
+  needsRefresh = false;
+}
+
+void settingsDrawKittalienResetConfirm() {
+  using namespace SettingsNS;
+
+  Paint_Clear(WHITE);
+  settingsDrawHeader("Confirm Reset");
+
+  EPD_DrawRectangle(150, 60, 642, 200, BLACK, 0);
+  EPD_DrawRectangle(152, 62, 640, 198, BLACK, 0);
+
+  EPD_ShowString(200, 75,  "Reset Kittalien?", 16, BLACK);
+  EPD_ShowString(200, 100, "All stats will be cleared.", 16, BLACK);
+  EPD_ShowString(200, 125, "A new pet starts fresh.", 16, BLACK);
+  EPD_ShowString(200, 150, "This cannot be undone!", 16, BLACK);
+
+  settingsDrawFooter("OK: Confirm Reset  EXIT: Cancel");
+
+  EPD_Display(ImageBW);
+  EPD_PartUpdate();
+  needsRefresh = false;
+}
+
 // ==================== INPUT HANDLING ====================
 
 void settingsHandleMainMenuInput(bool upPressed, bool downPressed, bool okPressed) {
@@ -676,13 +737,13 @@ void settingsHandleMainMenuInput(bool upPressed, bool downPressed, bool okPresse
   
   if (upPressed) {
     selectedItem--;
-    if (selectedItem < 0) selectedItem = 7;
+    if (selectedItem < 0) selectedItem = 8;
     needsRefresh = true;
   }
   
   if (downPressed) {
     selectedItem++;
-    if (selectedItem > 7) selectedItem = 0;
+    if (selectedItem > 8) selectedItem = 0;
     needsRefresh = true;
   }
   
@@ -730,7 +791,13 @@ void settingsHandleMainMenuInput(bool upPressed, bool downPressed, bool okPresse
         needsRefresh = true;
         break;
         
-      case 7: // Save & Exit
+      case 7: // Kittalien Options
+        currentMode = SETTINGS_KITTALIEN_OPTIONS;
+        selectedItem = 0;
+        needsRefresh = true;
+        break;
+        
+      case 8: // Save & Exit
         saveSettings();
         // Return handled by main loop
         break;
@@ -1078,6 +1145,42 @@ void settingsHandleWiFiOptionsInput(bool upPressed, bool downPressed, bool okPre
   }
 }
 
+void settingsHandleKittalienOptionsInput(bool upPressed, bool downPressed, bool okPressed) {
+  using namespace SettingsNS;
+
+  if (upPressed) {
+    selectedItem--;
+    if (selectedItem < 0) selectedItem = 2;
+    needsRefresh = true;
+  }
+
+  if (downPressed) {
+    selectedItem++;
+    if (selectedItem > 2) selectedItem = 0;
+    needsRefresh = true;
+  }
+
+  if (okPressed) {
+    switch (selectedItem) {
+      case 0: // Randomize name
+        kittalienRandomizeName();
+        needsRefresh = true;
+        break;
+
+      case 1: // Reset pet - show confirmation
+        confirmKittalienReset = true;
+        needsRefresh = true;
+        break;
+
+      case 2: // Back
+        currentMode = SETTINGS_MAIN_MENU;
+        selectedItem = 0;
+        needsRefresh = true;
+        break;
+    }
+  }
+}
+
 // ==================== PUBLIC INTERFACE ====================
 
 void settingsInit() {
@@ -1101,6 +1204,7 @@ void settingsInit() {
   scrollOffset = 0;
   needsRefresh = true;
   confirmDelete = false;
+  confirmKittalienReset = false;
   isEditingValue = false;
   
   Serial.println("[SETTINGS] Initialization complete");
@@ -1144,6 +1248,14 @@ void settingsUpdate() {
     case SETTINGS_ARTFRAME_OPTIONS:
       settingsDrawArtFrameOptions();
       break;
+
+    case SETTINGS_KITTALIEN_OPTIONS:
+      if (confirmKittalienReset) {
+        settingsDrawKittalienResetConfirm();
+      } else {
+        settingsDrawKittalienOptions();
+      }
+      break;
   }
 }
 
@@ -1155,7 +1267,20 @@ void settingsHandleInput(bool upPressed, bool downPressed, bool okPressed, bool 
     settingsHandleDeleteConfirmInput(okPressed, exitPressed);
     return;
   }
-  
+
+  // Handle kittalien reset confirmation
+  if (confirmKittalienReset) {
+    if (okPressed) {
+      kittalienResetPet();
+      confirmKittalienReset = false;
+      needsRefresh = true;
+    } else if (exitPressed) {
+      confirmKittalienReset = false;
+      needsRefresh = true;
+    }
+    return;
+  }
+
   // Exit pressed - cancel edit or go back
   if (exitPressed) {
     if (isEditingValue) {
@@ -1202,6 +1327,10 @@ void settingsHandleInput(bool upPressed, bool downPressed, bool okPressed, bool 
       
     case SETTINGS_ARTFRAME_OPTIONS:
       settingsHandleArtFrameOptionsInput(upPressed, downPressed, okPressed);
+      break;
+
+    case SETTINGS_KITTALIEN_OPTIONS:
+      settingsHandleKittalienOptionsInput(upPressed, downPressed, okPressed);
       break;
   }
 }
