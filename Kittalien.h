@@ -270,6 +270,11 @@ void applyTimeDecay() {
   if (currentTime < pet.lastUpdateTime) {
     Serial.println("[KITTALIEN] Time anomaly detected - resetting timer");
     pet.lastUpdateTime = currentTime;
+
+    // simulate some decay assuming at least 4 hours passed
+    pet.hunger -= KITTALIEN_HUNGER_DECAY_RATE * 4;
+    pet.happiness -= KITTALIEN_HAPPINESS_DECAY_RATE * 4; 
+
     savePetState();
     return;
   }
