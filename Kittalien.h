@@ -4,7 +4,6 @@
 #include "EPD.h"
 #include "SD.h"
 #include <Arduino.h>
-#include <time.h>
 
 // ==================== KITTALIEN CONFIGURATION ====================
 #define KITTALIEN_SAVE_FILE "/kittalien_save.txt"
