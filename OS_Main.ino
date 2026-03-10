@@ -9,6 +9,7 @@
 #include "ArtFrame.h"
 #include "Settings.h"
 #include "Kittalien.h"
+#include "Battery.h"
 
 // ==================== PIN DEFINITIONS ====================
 #define SCREEN_PWR 7         // Screen power pin
@@ -139,6 +140,9 @@ void loop() {
   // Update button states every loop
   buttons->update();
   
+  // Update battery readings periodically
+  batteryUpdate();
+  
   switch (currentMode) {
     case MODE_HOME:
       if (needsRedraw) {
@@ -191,6 +195,10 @@ void initializeHardware() {
   buttons = new ButtonManager(HOME_KEY, EXIT_KEY, PRV_KEY, NEXT_KEY, OK_KEY);
   buttons->begin();
   
+  // Initialize battery monitoring
+  batteryInit();
+  batteryForceUpdate();  // Get initial reading
+  
   Serial.println("[HW] Hardware initialized");
 }
 
@@ -216,8 +224,11 @@ void displayHomeScreen() {
   EPD_DrawLine(0, 30, 792, 30, BLACK);
   EPD_ShowString(10, 5, (char*)"E-INK OS", 16, BLACK);
   
-  // Battery indicator (placeholder)
-  EPD_ShowString(700, 5, (char*)"[BAT]", 16, BLACK);
+  // Battery indicator
+  char batteryStr[16];
+  bool showPercent = settingsGetShowBatteryPercent();
+  batteryGetStatusString(batteryStr, sizeof(batteryStr), showPercent);
+  EPD_ShowString(700, 5, batteryStr, 16, BLACK);
   
   // Menu items
   int startY = 50;
@@ -340,6 +351,9 @@ void returnToHome() {
   
   EPD_GPIOInit();
   Paint_NewImage(ImageBW, DISPLAY_WIDTH, DISPLAY_HEIGHT, Rotation, WHITE);
+  
+  // Update battery reading for fresh display
+  batteryForceUpdate();
   
   Serial.println("[OS] Display reinitialized");
   Serial.println("[OS] ========================================");

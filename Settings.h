@@ -4,6 +4,7 @@
 #include "EPD.h"
 #include "SD.h"
 #include "PersistentStorage.h"
+#include "Battery.h"
 #include <vector>
 
 // ==================== SETTINGS CONFIGURATION ====================
@@ -465,6 +466,14 @@ void settingsDrawPowerOptions() {
   
   int startY = 45;
   int lineHeight = 25;
+  int line = 0;
+  
+  // Battery status (read-only)
+  char batteryText[64];
+  float voltage = batteryGetVoltage();
+  int percentage = batteryGetPercentage();
+  sprintf(batteryText, "Battery: %.2fV (%d%%)", voltage, percentage);
+  EPD_ShowString(15, startY + (line++ * lineHeight), batteryText, 16, BLACK);
   
   // Auto-sleep timeout
   char sleepText[64];
@@ -473,13 +482,12 @@ void settingsDrawPowerOptions() {
   } else {
     sprintf(sleepText, "Auto-Sleep: %d min", currentSettings.autoSleepMinutes);
   }
-  
-  if (selectedItem == 0) EPD_DrawRectangle(5, startY - 2, 787, startY + lineHeight - 7, BLACK, 1);
-  EPD_ShowString(15, startY, sleepText, 16, selectedItem == 0 ? WHITE : BLACK);
+  if (selectedItem == 0) EPD_DrawRectangle(5, startY + (line - 1) * lineHeight - 2, 787, startY + line * lineHeight - 7, BLACK, 1);
+  EPD_ShowString(15, startY + (line++ * lineHeight), sleepText, 16, selectedItem == 0 ? WHITE : BLACK);
   
   // Back option
-  if (selectedItem == 1) EPD_DrawRectangle(5, startY + lineHeight - 2, 787, startY + (2 * lineHeight) - 7, BLACK, 1);
-  EPD_ShowString(15, startY + lineHeight, "Back to Main Menu", 16, selectedItem == 1 ? WHITE : BLACK);
+  if (selectedItem == 1) EPD_DrawRectangle(5, startY + (line - 1) * lineHeight - 2, 787, startY + line * lineHeight - 7, BLACK, 1);
+  EPD_ShowString(15, startY + (line * lineHeight), "Back to Main Menu", 16, selectedItem == 1 ? WHITE : BLACK);
   
   settingsDrawFooter("UP/DOWN: Navigate  OK: Adjust  EXIT: Back");
   
