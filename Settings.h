@@ -82,6 +82,7 @@ namespace SettingsNS {
   static int selectedItem = 0;
   static int scrollOffset = 0;
   static bool needsRefresh = true;
+  static bool isEditingValue = false;  // Track if we're editing a value
   
   // File management
   static std::vector<String> fileList;
@@ -276,6 +277,29 @@ bool deleteFile(const String& path, const String& filename) {
 
 // ==================== UI RENDERING ====================
 
+// Helper function to draw a single settings item with proper styling
+void settingsDrawItem(int itemIndex, int yPos, const char* text, bool canEdit = true) {
+  using namespace SettingsNS;
+  
+  bool isSelected = (itemIndex == selectedItem);
+  
+  if (isSelected) {
+    if (isEditingValue && canEdit) {
+      // Editing mode: outline box with arrow and black text
+      EPD_DrawRectangle(5, yPos - 2, 787, yPos + 18, BLACK, 0);
+      EPD_ShowString(10, yPos, ">", 16, BLACK);
+      EPD_ShowString(25, yPos, (char*)text, 16, BLACK);
+    } else {
+      // Selected but not editing: filled box with white text
+      EPD_DrawRectangle(5, yPos - 2, 787, yPos + 18, BLACK, 1);
+      EPD_ShowString(15, yPos, (char*)text, 16, WHITE);
+    }
+  } else {
+    // Not selected: normal black text
+    EPD_ShowString(15, yPos, (char*)text, 16, BLACK);
+  }
+}
+
 void settingsDrawHeader(const char* title) {
   EPD_DrawLine(0, 0, 792, 0, BLACK);
   EPD_DrawLine(0, 30, 792, 30, BLACK);
@@ -437,21 +461,22 @@ void settingsDrawDisplayOptions() {
   // Rotation
   char rotationText[32];
   sprintf(rotationText, "Rotation: %d deg", currentSettings.rotation);
-  EPD_ShowString(15, startY + (line++ * lineHeight), rotationText, 16, line - 1 == selectedItem ? WHITE : BLACK);
-  if (selectedItem == 0) EPD_DrawRectangle(5, startY - 2, 787, startY + lineHeight - 7, BLACK, 1);
+  settingsDrawItem(0, startY + (line * lineHeight), rotationText, true);
+  line++;
   
   // Battery indicator
-  EPD_ShowString(15, startY + (line * lineHeight), 
-                 currentSettings.showBatteryPercent ? "Battery: Show %" : "Battery: Icon only", 
-                 16, line == selectedItem ? WHITE : BLACK);
-  if (selectedItem == 1) EPD_DrawRectangle(5, startY + lineHeight - 2, 787, startY + (2 * lineHeight) - 7, BLACK, 1);
+  const char* batteryText = currentSettings.showBatteryPercent ? "Battery: Show %" : "Battery: Icon only";
+  settingsDrawItem(1, startY + (line * lineHeight), batteryText, true);
   line++;
   
   // Back option
-  EPD_ShowString(15, startY + (line * lineHeight), "Back to Main Menu", 16, line == selectedItem ? WHITE : BLACK);
-  if (selectedItem == 2) EPD_DrawRectangle(5, startY + (2 * lineHeight) - 2, 787, startY + (3 * lineHeight) - 7, BLACK, 1);
+  settingsDrawItem(2, startY + (line * lineHeight), "Back to Main Menu", false);
   
-  settingsDrawFooter("UP/DOWN: Navigate  OK: Toggle  EXIT: Back");
+  if (isEditingValue) {
+    settingsDrawFooter("UP/DOWN: Adjust  OK: Confirm  EXIT: Cancel");
+  } else {
+    settingsDrawFooter("UP/DOWN: Navigate  OK: Edit/Toggle  EXIT: Back");
+  }
   
   EPD_Display(ImageBW);
   EPD_PartUpdate();
@@ -482,14 +507,17 @@ void settingsDrawPowerOptions() {
   } else {
     sprintf(sleepText, "Auto-Sleep: %d min", currentSettings.autoSleepMinutes);
   }
-  if (selectedItem == 0) EPD_DrawRectangle(5, startY + (line - 1) * lineHeight - 2, 787, startY + line * lineHeight - 7, BLACK, 1);
-  EPD_ShowString(15, startY + (line++ * lineHeight), sleepText, 16, selectedItem == 0 ? WHITE : BLACK);
+  settingsDrawItem(0, startY + (line * lineHeight), sleepText, true);
+  line++;
   
   // Back option
-  if (selectedItem == 1) EPD_DrawRectangle(5, startY + (line - 1) * lineHeight - 2, 787, startY + line * lineHeight - 7, BLACK, 1);
-  EPD_ShowString(15, startY + (line * lineHeight), "Back to Main Menu", 16, selectedItem == 1 ? WHITE : BLACK);
+  settingsDrawItem(1, startY + (line * lineHeight), "Back to Main Menu", false);
   
-  settingsDrawFooter("UP/DOWN: Navigate  OK: Adjust  EXIT: Back");
+  if (isEditingValue) {
+    settingsDrawFooter("UP/DOWN: Adjust  OK: Confirm  EXIT: Cancel");
+  } else {
+    settingsDrawFooter("UP/DOWN: Navigate  OK: Edit  EXIT: Back");
+  }
   
   EPD_Display(ImageBW);
   EPD_PartUpdate();
@@ -509,22 +537,23 @@ void settingsDrawEReaderOptions() {
   // Font size
   char fontText[32];
   sprintf(fontText, "Font Size: %d", currentSettings.fontSize);
-  if (selectedItem == line) EPD_DrawRectangle(5, startY + (line * lineHeight) - 2, 787, startY + ((line + 1) * lineHeight) - 7, BLACK, 1);
-  EPD_ShowString(15, startY + (line * lineHeight), fontText, 16, line == selectedItem ? WHITE : BLACK);
+  settingsDrawItem(0, startY + (line * lineHeight), fontText, true);
   line++;
   
   // Progress save frequency
   char saveText[64];
   sprintf(saveText, "Save Progress: Every %d scrolls", currentSettings.progressSaveFrequency);
-  if (selectedItem == line) EPD_DrawRectangle(5, startY + (line * lineHeight) - 2, 787, startY + ((line + 1) * lineHeight) - 7, BLACK, 1);
-  EPD_ShowString(15, startY + (line * lineHeight), saveText, 16, line == selectedItem ? WHITE : BLACK);
+  settingsDrawItem(1, startY + (line * lineHeight), saveText, true);
   line++;
   
   // Back option
-  if (selectedItem == line) EPD_DrawRectangle(5, startY + (line * lineHeight) - 2, 787, startY + ((line + 1) * lineHeight) - 7, BLACK, 1);
-  EPD_ShowString(15, startY + (line * lineHeight), "Back to Main Menu", 16, line == selectedItem ? WHITE : BLACK);
+  settingsDrawItem(2, startY + (line * lineHeight), "Back to Main Menu", false);
   
-  settingsDrawFooter("UP/DOWN: Navigate  OK: Adjust  EXIT: Back");
+  if (isEditingValue) {
+    settingsDrawFooter("UP/DOWN: Adjust  OK: Confirm  EXIT: Cancel");
+  } else {
+    settingsDrawFooter("UP/DOWN: Navigate  OK: Edit  EXIT: Back");
+  }
   
   EPD_Display(ImageBW);
   EPD_PartUpdate();
@@ -542,24 +571,24 @@ void settingsDrawArtFrameOptions() {
   int line = 0;
   
   // Auto-cycle
-  EPD_ShowString(15, startY + (line * lineHeight), 
-                 currentSettings.artAutoCycleEnabled ? "Auto-Cycle: ON" : "Auto-Cycle: OFF", 
-                 16, line == selectedItem ? WHITE : BLACK);
-  if (selectedItem == line) EPD_DrawRectangle(5, startY + (line * lineHeight) - 2, 787, startY + ((line + 1) * lineHeight) - 7, BLACK, 1);
+  const char* autoCycleText = currentSettings.artAutoCycleEnabled ? "Auto-Cycle: ON" : "Auto-Cycle: OFF";
+  settingsDrawItem(0, startY + (line * lineHeight), autoCycleText, true);
   line++;
   
   // Cycle interval
   char cycleText[64];
   sprintf(cycleText, "Cycle Interval: %d sec", currentSettings.artCycleSeconds);
-  EPD_ShowString(15, startY + (line * lineHeight), cycleText, 16, line == selectedItem ? WHITE : BLACK);
-  if (selectedItem == line) EPD_DrawRectangle(5, startY + (line * lineHeight) - 2, 787, startY + ((line + 1) * lineHeight) - 7, BLACK, 1);
+  settingsDrawItem(1, startY + (line * lineHeight), cycleText, true);
   line++;
   
   // Back option
-  EPD_ShowString(15, startY + (line * lineHeight), "Back to Main Menu", 16, line == selectedItem ? WHITE : BLACK);
-  if (selectedItem == line) EPD_DrawRectangle(5, startY + (line * lineHeight) - 2, 787, startY + ((line + 1) * lineHeight) - 7, BLACK, 1);
+  settingsDrawItem(2, startY + (line * lineHeight), "Back to Main Menu", false);
   
-  settingsDrawFooter("UP/DOWN: Navigate  OK: Toggle/Adjust  EXIT: Back");
+  if (isEditingValue) {
+    settingsDrawFooter("UP/DOWN: Adjust  OK: Confirm  EXIT: Cancel");
+  } else {
+    settingsDrawFooter("UP/DOWN: Navigate  OK: Edit/Toggle  EXIT: Back");
+  }
   
   EPD_Display(ImageBW);
   EPD_PartUpdate();
@@ -757,35 +786,56 @@ void settingsHandleDeleteConfirmInput(bool okPressed, bool exitPressed) {
 void settingsHandleDisplayOptionsInput(bool upPressed, bool downPressed, bool okPressed) {
   using namespace SettingsNS;
   
-  if (upPressed) {
-    selectedItem--;
-    if (selectedItem < 0) selectedItem = 2;
-    needsRefresh = true;
-  }
-  
-  if (downPressed) {
-    selectedItem++;
-    if (selectedItem > 2) selectedItem = 0;
-    needsRefresh = true;
-  }
-  
-  if (okPressed) {
-    switch (selectedItem) {
-      case 0: // Rotation
-        currentSettings.rotation = (currentSettings.rotation + 90) % 360;
-        needsRefresh = true;
-        break;
-        
-      case 1: // Battery display
-        currentSettings.showBatteryPercent = !currentSettings.showBatteryPercent;
-        needsRefresh = true;
-        break;
-        
-      case 2: // Back
-        currentMode = SETTINGS_MAIN_MENU;
-        selectedItem = 0;
-        needsRefresh = true;
-        break;
+  if (isEditingValue) {
+    // In edit mode: UP/DOWN adjust value, OK confirms
+    if (okPressed) {
+      isEditingValue = false;
+      needsRefresh = true;
+    } else if (upPressed || downPressed) {
+      switch (selectedItem) {
+        case 0: // Rotation
+          if (upPressed) {
+            currentSettings.rotation = (currentSettings.rotation + 90) % 360;
+          } else {
+            currentSettings.rotation = (currentSettings.rotation - 90 + 360) % 360;
+          }
+          needsRefresh = true;
+          break;
+          
+        case 1: // Battery display (toggle on any press)
+          currentSettings.showBatteryPercent = !currentSettings.showBatteryPercent;
+          needsRefresh = true;
+          break;
+      }
+    }
+  } else {
+    // Navigation mode
+    if (upPressed) {
+      selectedItem--;
+      if (selectedItem < 0) selectedItem = 2;
+      needsRefresh = true;
+    }
+    
+    if (downPressed) {
+      selectedItem++;
+      if (selectedItem > 2) selectedItem = 0;
+      needsRefresh = true;
+    }
+    
+    if (okPressed) {
+      switch (selectedItem) {
+        case 0: // Rotation - enter edit mode
+        case 1: // Battery display - enter edit mode
+          isEditingValue = true;
+          needsRefresh = true;
+          break;
+          
+        case 2: // Back
+          currentMode = SETTINGS_MAIN_MENU;
+          selectedItem = 0;
+          needsRefresh = true;
+          break;
+      }
     }
   }
 }
@@ -793,36 +843,61 @@ void settingsHandleDisplayOptionsInput(bool upPressed, bool downPressed, bool ok
 void settingsHandlePowerOptionsInput(bool upPressed, bool downPressed, bool okPressed) {
   using namespace SettingsNS;
   
-  if (upPressed) {
-    selectedItem--;
-    if (selectedItem < 0) selectedItem = 1;
-    needsRefresh = true;
-  }
-  
-  if (downPressed) {
-    selectedItem++;
-    if (selectedItem > 1) selectedItem = 0;
-    needsRefresh = true;
-  }
-  
-  if (okPressed) {
-    switch (selectedItem) {
-      case 0: // Auto-sleep
-        // Cycle through: 0, 5, 10, 15, 30, 60 minutes
-        if (currentSettings.autoSleepMinutes == 0) currentSettings.autoSleepMinutes = 5;
-        else if (currentSettings.autoSleepMinutes == 5) currentSettings.autoSleepMinutes = 10;
-        else if (currentSettings.autoSleepMinutes == 10) currentSettings.autoSleepMinutes = 15;
-        else if (currentSettings.autoSleepMinutes == 15) currentSettings.autoSleepMinutes = 30;
-        else if (currentSettings.autoSleepMinutes == 30) currentSettings.autoSleepMinutes = 60;
-        else currentSettings.autoSleepMinutes = 0;
+  if (isEditingValue) {
+    // In edit mode: UP/DOWN adjust value, OK confirms
+    if (okPressed) {
+      isEditingValue = false;
+      needsRefresh = true;
+    } else if (upPressed || downPressed) {
+      if (selectedItem == 0) {
+        // Auto-sleep: cycle through values
+        if (upPressed) {
+          // Increase: 0 -> 5 -> 10 -> 15 -> 30 -> 60 -> 0
+          if (currentSettings.autoSleepMinutes == 0) currentSettings.autoSleepMinutes = 5;
+          else if (currentSettings.autoSleepMinutes == 5) currentSettings.autoSleepMinutes = 10;
+          else if (currentSettings.autoSleepMinutes == 10) currentSettings.autoSleepMinutes = 15;
+          else if (currentSettings.autoSleepMinutes == 15) currentSettings.autoSleepMinutes = 30;
+          else if (currentSettings.autoSleepMinutes == 30) currentSettings.autoSleepMinutes = 60;
+          else currentSettings.autoSleepMinutes = 0;
+        } else {
+          // Decrease: 60 -> 30 -> 15 -> 10 -> 5 -> 0 -> 60
+          if (currentSettings.autoSleepMinutes == 60) currentSettings.autoSleepMinutes = 30;
+          else if (currentSettings.autoSleepMinutes == 30) currentSettings.autoSleepMinutes = 15;
+          else if (currentSettings.autoSleepMinutes == 15) currentSettings.autoSleepMinutes = 10;
+          else if (currentSettings.autoSleepMinutes == 10) currentSettings.autoSleepMinutes = 5;
+          else if (currentSettings.autoSleepMinutes == 5) currentSettings.autoSleepMinutes = 0;
+          else currentSettings.autoSleepMinutes = 60;
+        }
         needsRefresh = true;
-        break;
-        
-      case 1: // Back
-        currentMode = SETTINGS_MAIN_MENU;
-        selectedItem = 0;
-        needsRefresh = true;
-        break;
+      }
+    }
+  } else {
+    // Navigation mode
+    if (upPressed) {
+      selectedItem--;
+      if (selectedItem < 0) selectedItem = 1;
+      needsRefresh = true;
+    }
+    
+    if (downPressed) {
+      selectedItem++;
+      if (selectedItem > 1) selectedItem = 0;
+      needsRefresh = true;
+    }
+    
+    if (okPressed) {
+      switch (selectedItem) {
+        case 0: // Auto-sleep - enter edit mode
+          isEditingValue = true;
+          needsRefresh = true;
+          break;
+          
+        case 1: // Back
+          currentMode = SETTINGS_MAIN_MENU;
+          selectedItem = 0;
+          needsRefresh = true;
+          break;
+      }
     }
   }
 }
@@ -830,41 +905,72 @@ void settingsHandlePowerOptionsInput(bool upPressed, bool downPressed, bool okPr
 void settingsHandleEReaderOptionsInput(bool upPressed, bool downPressed, bool okPressed) {
   using namespace SettingsNS;
   
-  if (upPressed) {
-    selectedItem--;
-    if (selectedItem < 0) selectedItem = 2;
-    needsRefresh = true;
-  }
-  
-  if (downPressed) {
-    selectedItem++;
-    if (selectedItem > 2) selectedItem = 0;
-    needsRefresh = true;
-  }
-  
-  if (okPressed) {
-    switch (selectedItem) {
-      case 0: // Font size
-        if (currentSettings.fontSize == 16) currentSettings.fontSize = 24;
-        else if (currentSettings.fontSize == 24) currentSettings.fontSize = 32;
-        else currentSettings.fontSize = 16;
-        needsRefresh = true;
-        break;
-        
-      case 1: // Save frequency
-        // Cycle: 3, 5, 10, 20
-        if (currentSettings.progressSaveFrequency == 3) currentSettings.progressSaveFrequency = 5;
-        else if (currentSettings.progressSaveFrequency == 5) currentSettings.progressSaveFrequency = 10;
-        else if (currentSettings.progressSaveFrequency == 10) currentSettings.progressSaveFrequency = 20;
-        else currentSettings.progressSaveFrequency = 3;
-        needsRefresh = true;
-        break;
-        
-      case 2: // Back
-        currentMode = SETTINGS_MAIN_MENU;
-        selectedItem = 0;
-        needsRefresh = true;
-        break;
+  if (isEditingValue) {
+    // In edit mode: UP/DOWN adjust value, OK confirms
+    if (okPressed) {
+      isEditingValue = false;
+      needsRefresh = true;
+    } else if (upPressed || downPressed) {
+      switch (selectedItem) {
+        case 0: // Font size
+          if (upPressed) {
+            if (currentSettings.fontSize == 16) currentSettings.fontSize = 24;
+            else if (currentSettings.fontSize == 24) currentSettings.fontSize = 32;
+            else currentSettings.fontSize = 16;
+          } else {
+            if (currentSettings.fontSize == 32) currentSettings.fontSize = 24;
+            else if (currentSettings.fontSize == 24) currentSettings.fontSize = 16;
+            else currentSettings.fontSize = 32;
+          }
+          needsRefresh = true;
+          break;
+          
+        case 1: // Save frequency
+          if (upPressed) {
+            // Increase: 3 -> 5 -> 10 -> 20 -> 3
+            if (currentSettings.progressSaveFrequency == 3) currentSettings.progressSaveFrequency = 5;
+            else if (currentSettings.progressSaveFrequency == 5) currentSettings.progressSaveFrequency = 10;
+            else if (currentSettings.progressSaveFrequency == 10) currentSettings.progressSaveFrequency = 20;
+            else currentSettings.progressSaveFrequency = 3;
+          } else {
+            // Decrease: 20 -> 10 -> 5 -> 3 -> 20
+            if (currentSettings.progressSaveFrequency == 20) currentSettings.progressSaveFrequency = 10;
+            else if (currentSettings.progressSaveFrequency == 10) currentSettings.progressSaveFrequency = 5;
+            else if (currentSettings.progressSaveFrequency == 5) currentSettings.progressSaveFrequency = 3;
+            else currentSettings.progressSaveFrequency = 20;
+          }
+          needsRefresh = true;
+          break;
+      }
+    }
+  } else {
+    // Navigation mode
+    if (upPressed) {
+      selectedItem--;
+      if (selectedItem < 0) selectedItem = 2;
+      needsRefresh = true;
+    }
+    
+    if (downPressed) {
+      selectedItem++;
+      if (selectedItem > 2) selectedItem = 0;
+      needsRefresh = true;
+    }
+    
+    if (okPressed) {
+      switch (selectedItem) {
+        case 0: // Font size - enter edit mode
+        case 1: // Save frequency - enter edit mode
+          isEditingValue = true;
+          needsRefresh = true;
+          break;
+          
+        case 2: // Back
+          currentMode = SETTINGS_MAIN_MENU;
+          selectedItem = 0;
+          needsRefresh = true;
+          break;
+      }
     }
   }
 }
@@ -872,40 +978,66 @@ void settingsHandleEReaderOptionsInput(bool upPressed, bool downPressed, bool ok
 void settingsHandleArtFrameOptionsInput(bool upPressed, bool downPressed, bool okPressed) {
   using namespace SettingsNS;
   
-  if (upPressed) {
-    selectedItem--;
-    if (selectedItem < 0) selectedItem = 2;
-    needsRefresh = true;
-  }
-  
-  if (downPressed) {
-    selectedItem++;
-    if (selectedItem > 2) selectedItem = 0;
-    needsRefresh = true;
-  }
-  
-  if (okPressed) {
-    switch (selectedItem) {
-      case 0: // Auto-cycle toggle
-        currentSettings.artAutoCycleEnabled = !currentSettings.artAutoCycleEnabled;
-        needsRefresh = true;
-        break;
-        
-      case 1: // Cycle interval
-        // Cycle: 10, 30, 60, 120, 300 seconds
-        if (currentSettings.artCycleSeconds == 10) currentSettings.artCycleSeconds = 30;
-        else if (currentSettings.artCycleSeconds == 30) currentSettings.artCycleSeconds = 60;
-        else if (currentSettings.artCycleSeconds == 60) currentSettings.artCycleSeconds = 120;
-        else if (currentSettings.artCycleSeconds == 120) currentSettings.artCycleSeconds = 300;
-        else currentSettings.artCycleSeconds = 10;
-        needsRefresh = true;
-        break;
-        
-      case 2: // Back
-        currentMode = SETTINGS_MAIN_MENU;
-        selectedItem = 0;
-        needsRefresh = true;
-        break;
+  if (isEditingValue) {
+    // In edit mode: UP/DOWN adjust value, OK confirms
+    if (okPressed) {
+      isEditingValue = false;
+      needsRefresh = true;
+    } else if (upPressed || downPressed) {
+      switch (selectedItem) {
+        case 0: // Auto-cycle toggle (toggle on any press)
+          currentSettings.artAutoCycleEnabled = !currentSettings.artAutoCycleEnabled;
+          needsRefresh = true;
+          break;
+          
+        case 1: // Cycle interval
+          if (upPressed) {
+            // Increase: 10 -> 30 -> 60 -> 120 -> 300 -> 10
+            if (currentSettings.artCycleSeconds == 10) currentSettings.artCycleSeconds = 30;
+            else if (currentSettings.artCycleSeconds == 30) currentSettings.artCycleSeconds = 60;
+            else if (currentSettings.artCycleSeconds == 60) currentSettings.artCycleSeconds = 120;
+            else if (currentSettings.artCycleSeconds == 120) currentSettings.artCycleSeconds = 300;
+            else currentSettings.artCycleSeconds = 10;
+          } else {
+            // Decrease: 300 -> 120 -> 60 -> 30 -> 10 -> 300
+            if (currentSettings.artCycleSeconds == 300) currentSettings.artCycleSeconds = 120;
+            else if (currentSettings.artCycleSeconds == 120) currentSettings.artCycleSeconds = 60;
+            else if (currentSettings.artCycleSeconds == 60) currentSettings.artCycleSeconds = 30;
+            else if (currentSettings.artCycleSeconds == 30) currentSettings.artCycleSeconds = 10;
+            else currentSettings.artCycleSeconds = 300;
+          }
+          needsRefresh = true;
+          break;
+      }
+    }
+  } else {
+    // Navigation mode
+    if (upPressed) {
+      selectedItem--;
+      if (selectedItem < 0) selectedItem = 2;
+      needsRefresh = true;
+    }
+    
+    if (downPressed) {
+      selectedItem++;
+      if (selectedItem > 2) selectedItem = 0;
+      needsRefresh = true;
+    }
+    
+    if (okPressed) {
+      switch (selectedItem) {
+        case 0: // Auto-cycle - enter edit mode
+        case 1: // Cycle interval - enter edit mode
+          isEditingValue = true;
+          needsRefresh = true;
+          break;
+          
+        case 2: // Back
+          currentMode = SETTINGS_MAIN_MENU;
+          selectedItem = 0;
+          needsRefresh = true;
+          break;
+      }
     }
   }
 }
@@ -969,6 +1101,7 @@ void settingsInit() {
   scrollOffset = 0;
   needsRefresh = true;
   confirmDelete = false;
+  isEditingValue = false;
   
   Serial.println("[SETTINGS] Initialization complete");
 }
@@ -1023,8 +1156,14 @@ void settingsHandleInput(bool upPressed, bool downPressed, bool okPressed, bool 
     return;
   }
   
-  // Exit pressed - go back
+  // Exit pressed - cancel edit or go back
   if (exitPressed) {
+    if (isEditingValue) {
+      // Cancel editing
+      isEditingValue = false;
+      needsRefresh = true;
+      return;
+    }
     if (currentMode != SETTINGS_MAIN_MENU) {
       currentMode = SETTINGS_MAIN_MENU;
       selectedItem = 0;

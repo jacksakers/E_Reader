@@ -222,7 +222,7 @@ void displayHomeScreen() {
   
   // Header
   EPD_DrawLine(0, 30, 792, 30, BLACK);
-  EPD_ShowString(10, 5, (char*)"E-INK OS", 16, BLACK);
+  EPD_ShowString(10, 5, (char*)"Paper Pal", 16, BLACK);
   
   // Battery indicator
   char batteryStr[16];
