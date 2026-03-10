@@ -221,7 +221,7 @@ void displayHomeScreen() {
   
   // Menu items
   int startY = 50;
-  int itemHeight = 35;
+  int itemHeight = 28;  // Reduced from 35 to fit 7 items
   
   for (int i = 0; i < NUM_MODES; i++) {
     int yPos = startY + (i * itemHeight);
