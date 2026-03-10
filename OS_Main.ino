@@ -8,6 +8,7 @@
 #include "EReader.h"
 #include "ArtFrame.h"
 #include "Settings.h"
+#include "Kittalien.h"
 
 // ==================== PIN DEFINITIONS ====================
 #define SCREEN_PWR 7         // Screen power pin
@@ -43,6 +44,7 @@ enum SystemMode {
   MODE_DASHBOARD,
   MODE_ARTFRAME,
   MODE_WEBPORTAL,
+  MODE_KITTALIEN,
   MODE_SETTINGS
 };
 
@@ -51,12 +53,13 @@ int selectedMenuItem = 0;
 bool needsRedraw = true;
 
 // ==================== MODE MENU ====================
-const int NUM_MODES = 6;
+const int NUM_MODES = 7;
 const char* modeNames[] = {
   "E-Reader",
   "Smart Dashboard",
   "Art Frame",
   "Web Portal",
+  "Kittalien Pet",
   "Settings",
   "Sleep"
 };
@@ -66,6 +69,7 @@ const char* modeDescriptions[] = {
   "Weather, time, news",
   "Random art display",
   "File upload via WiFi",
+  "Virtual pet game",
   "System configuration",
   "Enter deep sleep"
 };
@@ -85,6 +89,7 @@ void runEReaderMode();
 void runDashboardMode();
 void runArtFrameMode();
 void runWebPortalMode();
+void runKittalienMode();
 void runSettingsMode();
 void enterDeepSleep();
 
@@ -157,6 +162,10 @@ void loop() {
       
     case MODE_WEBPORTAL:
       runWebPortalMode();
+      break;
+      
+    case MODE_KITTALIEN:
+      runKittalienMode();
       break;
       
     case MODE_SETTINGS:
@@ -298,12 +307,17 @@ void launchMode(int modeIndex) {
       currentMode = MODE_WEBPORTAL;
       break;
       
-    case 4: // Settings
+    case 4: // Kittalien Pet
+      currentMode = MODE_KITTALIEN;
+      kittalienInit();
+      break;
+      
+    case 5: // Settings
       currentMode = MODE_SETTINGS;
       settingsInit();
       break;
       
-    case 5: // Sleep
+    case 6: // Sleep
       enterDeepSleep();
       break;
   }
@@ -435,6 +449,38 @@ void runArtFrameMode() {
     Serial.println("[OS] Exiting Art Frame to home...");
     Serial.flush();
     artFrameCleanup();
+    returnToHome();
+  }
+}
+
+// ==================== KITTALIEN MODE ====================
+void runKittalienMode() {
+  // Update Kittalien display and state
+  kittalienUpdate();
+  
+  // Small delay to prevent overwhelming the system
+  delay(20);
+  
+  // Handle input
+  bool upPressed = buttons->prv()->wasPressed();
+  bool downPressed = buttons->next()->wasPressed();
+  bool okPressed = buttons->ok()->wasPressed();
+  bool exitPressed = buttons->exit()->wasPressed();
+  bool homePressed = buttons->home()->wasPressed();
+  
+  if (upPressed || downPressed || okPressed || exitPressed || homePressed) {
+    Serial.printf("[OS] Kittalien input: UP=%d, DOWN=%d, OK=%d, EXIT=%d, HOME=%d\n", 
+                  upPressed, downPressed, okPressed, exitPressed, homePressed);
+    Serial.flush();
+  }
+  
+  kittalienHandleInput(upPressed, downPressed, okPressed, exitPressed);
+  
+  // Exit to home
+  if (exitPressed || homePressed) {
+    Serial.println("[OS] Exiting Kittalien to home...");
+    Serial.flush();
+    kittalienCleanup();
     returnToHome();
   }
 }
