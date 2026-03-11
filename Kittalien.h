@@ -430,7 +430,7 @@ void executeAction(KittalienNS::Action action) {
 // ==================== IMAGE LOADING ====================
 
 bool loadArtFile(const char* filename) {
-  String filepath = "/art/" + String(filename);
+  String filepath = "/art/game_art/" + String(filename);
   Serial.printf("[KITTALIEN] Loading image: %s\n", filepath.c_str());
 
   if (!SD.exists(filepath)) {
