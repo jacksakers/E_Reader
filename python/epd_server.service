@@ -1,0 +1,14 @@
+[Unit]
+Description=E-Paper Display Scraper Server
+After=network.target
+
+[Service]
+User=jackberry
+WorkingDirectory=/home/jackberry/usbdrv/epd_project
+# This uses the Python executable inside your virtual environment
+ExecStart=/home/jackberry/usbdrv/epd_project/venv/bin/python /home/jackberry/usbdrv/epd_project/http_reader_server.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
