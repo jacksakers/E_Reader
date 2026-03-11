@@ -10,6 +10,7 @@
 #include "Settings.h"
 #include "Kittalien.h"
 #include "Battery.h"
+#include "HttpReader.h"
 
 // ==================== PIN DEFINITIONS ====================
 #define SCREEN_PWR 7         // Screen power pin
@@ -42,6 +43,7 @@ ButtonManager* buttons = nullptr;
 enum SystemMode {
   MODE_HOME,
   MODE_EREADER,
+  MODE_HTTPREADER,
   MODE_DASHBOARD,
   MODE_ARTFRAME,
   MODE_WEBPORTAL,
@@ -54,9 +56,10 @@ int selectedMenuItem = 0;
 bool needsRedraw = true;
 
 // ==================== MODE MENU ====================
-const int NUM_MODES = 7;
+const int NUM_MODES = 8;
 const char* modeNames[] = {
   "E-Reader",
+  "HTTP Reader",
   "Smart Dashboard",
   "Art Frame",
   "Web Portal",
@@ -67,6 +70,7 @@ const char* modeNames[] = {
 
 const char* modeDescriptions[] = {
   "Read books from SD card",
+  "Fetch articles from the web",
   "Weather, time, news",
   "Random art display",
   "File upload via WiFi",
@@ -85,6 +89,9 @@ void returnToHome();
 
 // E-Reader mode functions
 void runEReaderMode();
+
+// HTTP Reader mode
+void runHttpReaderMode();
 
 // Other mode stubs
 void runDashboardMode();
@@ -154,6 +161,10 @@ void loop() {
       
     case MODE_EREADER:
       runEReaderMode();
+      break;
+
+    case MODE_HTTPREADER:
+      runHttpReaderMode();
       break;
       
     case MODE_DASHBOARD:
@@ -304,31 +315,36 @@ void launchMode(int modeIndex) {
       currentMode = MODE_EREADER;
       eReaderInit();
       break;
+
+    case 1: // HTTP Reader
+      currentMode = MODE_HTTPREADER;
+      httpReaderInit();
+      break;
       
-    case 1: // Smart Dashboard
+    case 2: // Smart Dashboard
       currentMode = MODE_DASHBOARD;
       break;
       
-    case 2: // Art Frame
+    case 3: // Art Frame
       currentMode = MODE_ARTFRAME;
       artFrameInit();
       break;
       
-    case 3: // Web Portal
+    case 4: // Web Portal
       currentMode = MODE_WEBPORTAL;
       break;
       
-    case 4: // Kittalien Pet
+    case 5: // Kittalien Pet
       currentMode = MODE_KITTALIEN;
       kittalienInit();
       break;
       
-    case 5: // Settings
+    case 6: // Settings
       currentMode = MODE_SETTINGS;
       settingsInit();
       break;
       
-    case 6: // Sleep
+    case 7: // Sleep
       enterDeepSleep();
       break;
   }
@@ -413,6 +429,36 @@ void runEReaderMode() {
       eReaderCleanup();
       returnToHome();
     }
+  }
+}
+
+// ==================== HTTP READER MODE ====================
+void runHttpReaderMode() {
+  httpReaderUpdate();
+  delay(20);
+
+  bool upPressed   = buttons->prv()->wasPressed();
+  bool downPressed = buttons->next()->wasPressed();
+  bool okPressed   = buttons->ok()->wasPressed();
+  bool exitPressed = buttons->exit()->wasPressed();
+  bool homePressed = buttons->home()->wasPressed();
+
+  // homePressed always returns to the OS home screen
+  if (homePressed) {
+    Serial.println("[OS] Exiting HTTP Reader to home...");
+    httpReaderCleanup();
+    returnToHome();
+    return;
+  }
+
+  // httpReaderHandleInput returns false when EXIT is pressed from the
+  // top-level URL-select menu, meaning we should leave the mode.
+  bool stayInMode = httpReaderHandleInput(upPressed, downPressed,
+                                          okPressed, exitPressed);
+  if (!stayInMode) {
+    Serial.println("[OS] HTTP Reader requested exit to home");
+    httpReaderCleanup();
+    returnToHome();
   }
 }
 
