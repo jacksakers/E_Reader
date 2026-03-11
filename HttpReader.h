@@ -619,8 +619,44 @@ void httpReaderInit() {
   currentLine    = 0;
   needsRefresh   = true;
 
+  // Attempt STA connection if not already connected
   if (WiFi.status() != WL_CONNECTED) {
-    errorMessage = "WiFi not connected — enable STA mode in Settings";
+    int wifiMode = settingsGetWiFiMode();
+    if (wifiMode != 2) {
+      errorMessage = "WiFi not in STA mode — go to Settings > WiFi Options";
+      currentState = HR_ERROR;
+      return;
+    }
+
+    const char* ssid     = settingsGetWiFiSTASSID();
+    const char* password = settingsGetWiFiSTAPassword();
+    Serial.printf("[HTTPREADER] Connecting to WiFi: %s\n", ssid);
+
+    // Show connecting screen
+    Paint_Clear(WHITE);
+    EPD_DrawLine(0, 0, 792, 0, BLACK);
+    EPD_DrawLine(0, 35, 792, 35, BLACK);
+    EPD_ShowString(HTTPREADER_LEFT_MARGIN, 8,  (char*)"HTTP READER - CONNECTING...", 16, BLACK);
+    char connMsg[80];
+    snprintf(connMsg, sizeof(connMsg), "Connecting to: %s", ssid);
+    EPD_ShowString(HTTPREADER_LEFT_MARGIN, 65, connMsg, 16, BLACK);
+    EPD_Display(ImageBW);
+    EPD_PartUpdate();
+
+    WiFi.mode(WIFI_STA);
+    WiFi.begin(ssid, password);
+
+    int attempts = 0;
+    while (WiFi.status() != WL_CONNECTED && attempts < 20) {
+      delay(500);
+      Serial.print(".");
+      attempts++;
+    }
+    Serial.println();
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    errorMessage = "WiFi connection failed — check SSID/password in Settings";
     currentState = HR_ERROR;
   } else {
     currentState = HR_URL_SELECT;
