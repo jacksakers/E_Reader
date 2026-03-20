@@ -32,3 +32,10 @@ desktop.ini
 # Build directories
 build/
 .build/
+
+#images
+*.jpeg
+*.jpg
+*.png
+*.gif
+*.webp
