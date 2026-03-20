@@ -53,6 +53,13 @@ extern uint8_t ImageBW[27200];
 #define DASH_MIN_VALID_YEAR    2024     // Below this → NTP data is garbage
 #define DASH_MIN_REFETCH_MS    (4UL * 3600UL * 1000UL) // 4 h between auto-fetches
 
+// Weather icon configuration – adjust W/H to match your .art files
+#define DASH_WEATHER_ICON_W    48
+#define DASH_WEATHER_ICON_H    48
+#define DASH_WEATHER_ICON_PATH "/art/weather"
+#define DASH_WEATHER_ICON_BYTES \
+  ((DASH_WEATHER_ICON_W / 8 + ((DASH_WEATHER_ICON_W % 8) ? 1 : 0)) * DASH_WEATHER_ICON_H)
+
 // Display layout constants
 #define DASH_HDR_Y   7    // Header text Y
 #define DASH_LINE1_Y 28   // Horizontal rule below header
@@ -106,6 +113,9 @@ namespace DashboardNS {
 
   // Track whether WIFi was already up before we touched it
   static bool    wifiWasConnected = false;
+
+  // Buffer for loading weather icon bitmaps from SD card
+  static uint8_t weatherIconBuf[DASH_WEATHER_ICON_BYTES];
 
 } // namespace DashboardNS
 
@@ -163,6 +173,52 @@ static void dashFormatTemp(float tempC, char* buf, size_t len) {
   } else {
     snprintf(buf, len, "%.0fC", tempC);
   }
+}
+
+
+// ==================== WEATHER ICON HELPERS ====================
+
+// Maps a WMO weather code to a filename inside DASH_WEATHER_ICON_PATH.
+// Returns nullptr when no icon is defined for the code (e.g. snow).
+static const char* dashWeatherIconFile(int code) {
+  if (code == 0)                      return "sun.art";
+  if (code <= 2)                      return "sun-and-cloud.art";
+  if (code == 3)                      return "cloud.art";
+  if (code == 45 || code == 48)       return "fog.art";
+  if (code >= 51 && code <= 55)       return "drizzle.art";
+  if (code >= 61 && code <= 65)       return "rain.art";
+  if (code >= 80 && code <= 82)       return "showers.art";
+  if (code >= 95)                     return "t-storm.art";
+  return nullptr;  // snow / other – no icon, caller uses text fallback
+}
+
+// Loads and draws a weather icon for the given WMO code at (x, y).
+// Returns true when the icon was rendered; false = caller should show text.
+static bool dashShowWeatherIcon(int code, uint16_t x, uint16_t y) {
+  using namespace DashboardNS;
+
+  const char* iconFile = dashWeatherIconFile(code);
+  if (!iconFile) return false;
+
+  char path[64];
+  snprintf(path, sizeof(path), "%s/%s", DASH_WEATHER_ICON_PATH, iconFile);
+
+  if (!SD.exists(path)) return false;
+
+  File f = SD.open(path, FILE_READ);
+  if (!f) return false;
+
+  size_t bytesRead = f.read(weatherIconBuf, sizeof(weatherIconBuf));
+  f.close();
+
+  if (bytesRead < sizeof(weatherIconBuf)) {
+    Serial.printf("[DASHBOARD] Icon too small: %s (%d bytes, need %d)\n",
+                  path, (int)bytesRead, (int)sizeof(weatherIconBuf));
+    return false;
+  }
+
+  EPD_ShowPicture(x, y, DASH_WEATHER_ICON_W, DASH_WEATHER_ICON_H, weatherIconBuf, WHITE);
+  return true;
 }
 
 
@@ -478,14 +534,23 @@ static void dashDrawMainScreen() {
   char hiloStr[24];
   snprintf(hiloStr, sizeof(hiloStr), "H:%s  L:%s", hiStr, loStr);
 
-  // Icon + current temp + description
-  EPD_ShowString(10,  y, (char*)dashWeatherIcon(weatherData.currentCode), 16, BLACK);
-  EPD_ShowString(65,  y, curTempStr,                                       16, BLACK);
-  EPD_ShowString(120, y, (char*)dashWeatherDesc(weatherData.currentCode),  16, BLACK);
-  EPD_ShowString(400, y, windStr,                                           16, BLACK);
-  EPD_ShowString(590, y, hiloStr,                                           16, BLACK);
-
-  y += 22;
+  // Current conditions: try SD icon first, fall back to ASCII text
+  bool mainIconShown = dashShowWeatherIcon(weatherData.currentCode, 10, y);
+  if (mainIconShown) {
+    int tx = 10 + DASH_WEATHER_ICON_W + 8;
+    EPD_ShowString(tx,       y,      curTempStr,                                       16, BLACK);
+    EPD_ShowString(tx + 64,  y,      (char*)dashWeatherDesc(weatherData.currentCode),  16, BLACK);
+    EPD_ShowString(tx,       y + 20, windStr,                                           16, BLACK);
+    EPD_ShowString(tx,       y + 40, hiloStr,                                           16, BLACK);
+    y += DASH_WEATHER_ICON_H + 4;
+  } else {
+    EPD_ShowString(10,  y, (char*)dashWeatherIcon(weatherData.currentCode), 16, BLACK);
+    EPD_ShowString(65,  y, curTempStr,                                       16, BLACK);
+    EPD_ShowString(120, y, (char*)dashWeatherDesc(weatherData.currentCode),  16, BLACK);
+    EPD_ShowString(400, y, windStr,                                           16, BLACK);
+    EPD_ShowString(590, y, hiloStr,                                           16, BLACK);
+    y += 22;
+  }
   EPD_DrawLine(0, y, 792, y, BLACK);
   y += 4;
 
@@ -500,25 +565,31 @@ static void dashDrawMainScreen() {
 
     // Day label
     const char* dayLabel = (i == 0) ? "TODAY" : fc.dayName;
-    EPD_ShowString(x, y,      (char*)dayLabel,                  16, BLACK);
-    EPD_ShowString(x, y + 20, (char*)dashWeatherIcon(fc.weatherCode), 16, BLACK);
+    EPD_ShowString(x, y, (char*)dayLabel, 16, BLACK);
 
-    // Condition text (shortened to fit column)
+    // Icon or text fallback for each forecast column
+    bool fcIconShown = dashShowWeatherIcon(fc.weatherCode, x, y + 18);
+    if (!fcIconShown) {
+      EPD_ShowString(x, y + 20, (char*)dashWeatherIcon(fc.weatherCode), 16, BLACK);
+    }
+
+    // Condition and temps – placed below icon or text row
+    int condY = fcIconShown ? (y + 18 + DASH_WEATHER_ICON_H + 2) : (y + 40);
     const char* cond = dashWeatherDesc(fc.weatherCode);
     char condShort[14];
     strncpy(condShort, cond, 13);
     condShort[13] = '\0';
-    EPD_ShowString(x, y + 40, condShort, 16, BLACK);
+    EPD_ShowString(x, condY, condShort, 16, BLACK);
 
     char fcHi[10], fcLo[10];
     dashFormatTemp(fc.tempMax, fcHi, sizeof(fcHi));
     dashFormatTemp(fc.tempMin, fcLo, sizeof(fcLo));
-    EPD_ShowString(x, y + 60, fcHi, 16, BLACK);
-    EPD_ShowString(x, y + 80, fcLo, 16, BLACK);
+    EPD_ShowString(x, condY + 20, fcHi, 16, BLACK);
+    EPD_ShowString(x, condY + 40, fcLo, 16, BLACK);
 
-    // Column divider
+    // Column divider – extend full height of the forecast band
     if (i < weatherData.forecastCount - 1) {
-      EPD_DrawLine(x + colW - 4, y - 2, x + colW - 4, y + 100, BLACK);
+      EPD_DrawLine(x + colW - 4, y - 2, x + colW - 4, DASH_FTR_LINE_Y - 2, BLACK);
     }
   }
 
