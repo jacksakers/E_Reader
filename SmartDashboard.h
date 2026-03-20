@@ -195,10 +195,14 @@ static const char* dashWeatherIconFile(int code) {
   return nullptr;  // snow / other – no icon, caller uses text fallback
 }
 
-// Returns the pixel value (0=BLACK, 1=WHITE) at (px, py) in a raw 800x272
-// 1bpp art buffer (100 bytes per row, MSB = leftmost pixel).
+// Returns the pixel value at visual position (px, py) in a raw art buffer.
+// The buffer is 100 bytes per row (800 bits), but the display hardware has an
+// 8-bit dead-zone at bit column 396 in each row — same gap that Paint_SetPixel
+// skips internally.  Visible content lives in columns 0-395 and 404-795
+// (792 px total), so px here is a logical 0-791 coordinate.
 static inline int dashIconGetPixel(const uint8_t* buf, int px, int py) {
-  return (buf[py * 100 + px / 8] >> (7 - (px % 8))) & 1;
+  int bx = (px >= 396) ? px + 8 : px;   // skip the 8-bit hardware gap
+  return (buf[py * 100 + bx / 8] >> (7 - (bx % 8))) & 1;
 }
 
 // Loads a weather icon from SD, scales it down to fit within maxW x maxH
@@ -228,8 +232,10 @@ static bool dashShowWeatherIcon(int code, uint16_t x, uint16_t y,
     return false;
   }
 
-  // Source is always 800x272.  Scale to fit bounding box, preserving ratio.
-  const int srcW = 800, srcH = 272;
+  // Visible source width is 792 px (800 minus the 8-bit hardware gap).
+  // Art files are pre-rotated 180° for direct hardware display; Paint_SetPixel
+  // with Rotation=180 applies another 180°, so sample in reverse to cancel.
+  const int srcW = 792, srcH = 272;
   int dstW, dstH;
   if ((int)maxW * srcH <= (int)maxH * srcW) {
     dstW = maxW;
@@ -239,11 +245,11 @@ static bool dashShowWeatherIcon(int code, uint16_t x, uint16_t y,
     dstW = (int)maxH * srcW / srcH;
   }
 
-  // Nearest-neighbour downscale drawn directly into the Paint buffer
+  // Nearest-neighbour downscale with 180° source flip
   for (int dy = 0; dy < dstH; dy++) {
-    int sy = dy * srcH / dstH;
+    int sy = (srcH - 1) - (dy * srcH / dstH);
     for (int dx = 0; dx < dstW; dx++) {
-      int sx = dx * srcW / dstW;
+      int sx = (srcW - 1) - (dx * srcW / dstW);
       Paint_SetPixel(x + dx, y + dy,
                      dashIconGetPixel(weatherIconBuf, sx, sy) ? WHITE : BLACK);
     }
@@ -574,7 +580,7 @@ static void dashDrawMainScreen() {
     EPD_ShowString(tx + 64,  y,      (char*)dashWeatherDesc(weatherData.currentCode),  16, BLACK);
     EPD_ShowString(tx,       y + 20, windStr,                                           16, BLACK);
     EPD_ShowString(tx,       y + 40, hiloStr,                                           16, BLACK);
-    y += DASH_WEATHER_ICON_H + 4;
+    y += max((int)DASH_WEATHER_ICON_H, 56) + 10;  // clear icon (44px) and 3 text rows (y+56)
   } else {
     EPD_ShowString(10,  y, (char*)dashWeatherIcon(weatherData.currentCode), 16, BLACK);
     EPD_ShowString(65,  y, curTempStr,                                       16, BLACK);
