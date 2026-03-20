@@ -53,6 +53,7 @@ namespace SettingsNS {
     int  dashUpdateHour1;           // First  daily weather-fetch hour (0-23)
     int  dashUpdateHour2;           // Second daily weather-fetch hour (0-23, -1 = disabled)
     bool dashUseFahrenheit;         // Display temperatures in °F instead of °C
+    bool dashDST;                   // Daylight Saving Time active (+1 hour)
   };
   
   // Default settings
@@ -79,7 +80,8 @@ namespace SettingsNS {
     -5,              // dashTimezoneOffset (EST / UTC-5)
     6,               // dashUpdateHour1 (6 AM)
     18,              // dashUpdateHour2 (6 PM)
-    false            // dashUseFahrenheit
+    false,           // dashUseFahrenheit
+    true             // dashDST (Daylight Saving Time)
   };
   
   static bool settingsLoaded = false;
@@ -176,6 +178,7 @@ bool parseSettingsLine(const char* line) {
   else if (strcmp(key, "dashUpdateHour1")    == 0) currentSettings.dashUpdateHour1    = atoi(value);
   else if (strcmp(key, "dashUpdateHour2")    == 0) currentSettings.dashUpdateHour2    = atoi(value);
   else if (strcmp(key, "dashUseFahrenheit")  == 0) currentSettings.dashUseFahrenheit  = (atoi(value) != 0);
+  else if (strcmp(key, "dashDST")            == 0) currentSettings.dashDST            = (atoi(value) != 0);
 
   return true;
 }
@@ -254,6 +257,7 @@ bool saveSettings() {
   file.printf("dashUpdateHour1=%d\n",    currentSettings.dashUpdateHour1);
   file.printf("dashUpdateHour2=%d\n",    currentSettings.dashUpdateHour2);
   file.printf("dashUseFahrenheit=%d\n",  currentSettings.dashUseFahrenheit ? 1 : 0);
+  file.printf("dashDST=%d\n",            currentSettings.dashDST ? 1 : 0);
 
   file.close();
   
@@ -384,7 +388,7 @@ void settingsDrawMainMenu() {
   const int numItems = 10;
   
   int startY = 45;
-  int itemHeight = 25;
+  int itemHeight = 20;
   
   for (int i = 0; i < numItems; i++) {
     int yPos = startY + (i * itemHeight);
@@ -767,8 +771,13 @@ void settingsDrawDashboardOptions() {
                          ? "Units: Fahrenheit" : "Units: Celsius";
   settingsDrawItem(6, startY + (line++ * lineHeight), unitText, true);
 
-  // 7: Back
-  settingsDrawItem(7, startY + (line++ * lineHeight), "Back to Main Menu", false);
+  // 7: DST
+  const char* dstText = currentSettings.dashDST
+                        ? "DST: On  (+1 hr)" : "DST: Off";
+  settingsDrawItem(7, startY + (line++ * lineHeight), dstText, true);
+
+  // 8: Back
+  settingsDrawItem(8, startY + (line++ * lineHeight), "Back to Main Menu", false);
 
   if (isEditingValue) {
     settingsDrawFooter("UP/DOWN: Adjust  OK: Confirm  EXIT: Cancel");
@@ -784,7 +793,7 @@ void settingsDrawDashboardOptions() {
 void settingsHandleDashboardOptionsInput(bool upPressed, bool downPressed, bool okPressed) {
   using namespace SettingsNS;
 
-  const int NUM_ITEMS = 8;  // items 0-7
+  const int NUM_ITEMS = 9;  // items 0-8
 
   if (isEditingValue) {
     if (okPressed) {
@@ -840,6 +849,10 @@ void settingsHandleDashboardOptionsInput(bool upPressed, bool downPressed, bool 
 
       case 6: // Units toggle
         currentSettings.dashUseFahrenheit = !currentSettings.dashUseFahrenheit;
+        break;
+
+      case 7: // DST toggle
+        currentSettings.dashDST = !currentSettings.dashDST;
         break;
 
       default: break;
@@ -1644,6 +1657,10 @@ int settingsGetDashUpdateHour2() {
 
 bool settingsGetDashUseFahrenheit() {
   return SettingsNS::currentSettings.dashUseFahrenheit;
+}
+
+bool settingsGetDashDST() {
+  return SettingsNS::currentSettings.dashDST;
 }
 
 #endif // SETTINGS_H

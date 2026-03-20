@@ -36,6 +36,7 @@ extern int         settingsGetDashTimezoneOffset();
 extern int         settingsGetDashUpdateHour1();
 extern int         settingsGetDashUpdateHour2();
 extern bool        settingsGetDashUseFahrenheit();
+extern bool        settingsGetDashDST();
 extern bool        settingsGetWiFiEnabled();
 extern int         settingsGetWiFiMode();
 extern const char* settingsGetWiFiSTASSID();
@@ -262,7 +263,9 @@ static bool dashSyncNTP() {
   using namespace DashboardNS;
 
   int tzOffsetHours = settingsGetDashTimezoneOffset();
-  Serial.printf("[DASHBOARD] Syncing NTP (UTC%+d)...\n", tzOffsetHours);
+  if (settingsGetDashDST()) tzOffsetHours += 1;
+  Serial.printf("[DASHBOARD] Syncing NTP (UTC%+d, DST=%s)...\n",
+                tzOffsetHours, settingsGetDashDST() ? "on" : "off");
   configTime((long)tzOffsetHours * 3600L, 0, DASH_NTP_SERVER1, DASH_NTP_SERVER2);
 
   struct tm ti = {};
