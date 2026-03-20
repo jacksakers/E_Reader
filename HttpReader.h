@@ -798,7 +798,10 @@ void httpReaderCleanup() {
   currentState = HR_URL_SELECT;
   needsRefresh = true;
 
-  Serial.println("[HTTPREADER] Cleaned up");
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+
+  Serial.println("[HTTPREADER] Cleaned up, WiFi off");
 }
 
 #endif // HTTPREADER_H

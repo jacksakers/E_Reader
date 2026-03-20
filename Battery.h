@@ -151,7 +151,17 @@ void batteryUpdate() {
 void batteryForceUpdate() {
   using namespace BatteryNS;
   lastUpdateTime = 0;  // Reset timer to force update
-  batteryUpdate();
+  
+  int rawADC = batteryReadRawADC();
+  float voltage = batteryCalculateVoltage(rawADC);
+  int percentage = batteryVoltageToPercentage(voltage);
+  lastVoltage = voltage;
+  lastPercentage = percentage;
+  lastUpdateTime = millis();
+  
+  // Always print on forced update for diagnostics
+  Serial.printf("[BATTERY] FORCED: rawADC=%d, ADC_pin=%.3fV, battery=%.2fV, pct=%d%%\n",
+                rawADC, (rawADC / ADC_RESOLUTION) * ADC_REFERENCE_VOLTAGE, voltage, percentage);
 }
 
 // Get current battery voltage
