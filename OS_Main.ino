@@ -106,7 +106,7 @@ void setup() {
   Serial.begin(115200);
   delay(100);
   Serial.println("\n\n=================================");
-  Serial.println("E-Ink OS Booting...");
+  Serial.println("Paper Pal OS Booting...");
   Serial.println("=================================");
   
   initializeHardware();
@@ -122,7 +122,7 @@ void setup() {
   EPD_Update();
   
   Paint_Clear(WHITE);
-  EPD_ShowString(300, 100, (char*)"E-INK OS", 16, BLACK);
+  EPD_ShowString(300, 100, (char*)"Paper Pal OS", 16, BLACK);
   EPD_ShowString(280, 130, (char*)"Starting...", 16, BLACK);
   EPD_Display(ImageBW);
   EPD_PartUpdate();
@@ -136,7 +136,7 @@ void setup() {
   currentMode = MODE_HOME;
   needsRedraw = true;
   
-  Serial.println("Boot complete. Welcome to E-Ink OS!");
+  Serial.println("Boot complete. Welcome to Paper Pal OS!");
   Serial.printf("Free heap: %d bytes\n", ESP.getFreeHeap());
   Serial.printf("Free PSRAM: %d bytes\n", ESP.getFreePsram());
   Serial.println("=========================================\n");
@@ -242,8 +242,8 @@ void displayHomeScreen() {
   EPD_ShowString(700, 5, batteryStr, 16, BLACK);
   
   // Menu items
-  int startY = 50;
-  int itemHeight = 28;  // Reduced from 35 to fit 7 items
+  int startY = 35;
+  int itemHeight = 25;  // Sized to fit all 8 items within the 272px display
   
   for (int i = 0; i < NUM_MODES; i++) {
     int yPos = startY + (i * itemHeight);

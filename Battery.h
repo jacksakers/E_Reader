@@ -21,13 +21,14 @@
 // GPIO pin for battery voltage reading (through voltage divider)
 #define BATTERY_ADC_PIN 3
 
-// Voltage divider ratio (typically 2:1 for LiPo batteries on ESP32)
-// If your board has a different ratio, adjust this value
-#define VOLTAGE_DIVIDER_RATIO 2.0
+// Voltage divider ratio for external 100kΩ/10kΩ divider on CrowPanel:
+// ratio = (R1 + R2) / R2 = (100k + 10k) / 10k = 11.0
+// Adjust if you used different resistor values
+#define VOLTAGE_DIVIDER_RATIO 11.0
 
 // ADC configuration for ESP32-S3
 #define ADC_RESOLUTION 4096.0  // 12-bit ADC
-#define ADC_REFERENCE_VOLTAGE 3.3  // ESP32-S3 ADC reference voltage
+#define ADC_REFERENCE_VOLTAGE 2.5  // ESP32-S3 ADC_11db effective range is ~2.5V
 
 // LiPo battery voltage thresholds (in volts)
 #define BATTERY_MAX_VOLTAGE 4.2   // Fully charged
