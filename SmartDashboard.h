@@ -53,12 +53,14 @@ extern uint8_t ImageBW[27200];
 #define DASH_MIN_VALID_YEAR    2024     // Below this → NTP data is garbage
 #define DASH_MIN_REFETCH_MS    (4UL * 3600UL * 1000UL) // 4 h between auto-fetches
 
-// Weather icon configuration – adjust W/H to match your .art files
-#define DASH_WEATHER_ICON_W    48
-#define DASH_WEATHER_ICON_H    48
-#define DASH_WEATHER_ICON_PATH "/art/weather"
-#define DASH_WEATHER_ICON_BYTES \
-  ((DASH_WEATHER_ICON_W / 8 + ((DASH_WEATHER_ICON_W % 8) ? 1 : 0)) * DASH_WEATHER_ICON_H)
+// Weather icon configuration
+// All .art files are full 800x272 display images; these are the max bounding
+// boxes they will be scaled into (aspect ratio is always preserved).
+#define DASH_WEATHER_ICON_PATH   "/art/weather"
+#define DASH_WEATHER_ICON_W      120   // max width  – current-weather icon
+#define DASH_WEATHER_ICON_H       44   // max height – current-weather icon
+#define DASH_WEATHER_ICON_FC_W    90   // max width  – forecast strip icons
+#define DASH_WEATHER_ICON_FC_H    38   // max height – forecast strip icons
 
 // Display layout constants
 #define DASH_HDR_Y   7    // Header text Y
@@ -114,8 +116,9 @@ namespace DashboardNS {
   // Track whether WIFi was already up before we touched it
   static bool    wifiWasConnected = false;
 
-  // Buffer for loading weather icon bitmaps from SD card
-  static uint8_t weatherIconBuf[DASH_WEATHER_ICON_BYTES];
+  // Buffer for loading weather icon bitmaps from SD card.
+  // All .art files are full 800x272 1bpp images = 27200 bytes.
+  static uint8_t weatherIconBuf[27200];
 
 } // namespace DashboardNS
 
@@ -192,9 +195,18 @@ static const char* dashWeatherIconFile(int code) {
   return nullptr;  // snow / other – no icon, caller uses text fallback
 }
 
-// Loads and draws a weather icon for the given WMO code at (x, y).
+// Returns the pixel value (0=BLACK, 1=WHITE) at (px, py) in a raw 800x272
+// 1bpp art buffer (100 bytes per row, MSB = leftmost pixel).
+static inline int dashIconGetPixel(const uint8_t* buf, int px, int py) {
+  return (buf[py * 100 + px / 8] >> (7 - (px % 8))) & 1;
+}
+
+// Loads a weather icon from SD, scales it down to fit within maxW x maxH
+// (preserving aspect ratio) using nearest-neighbour sampling, and draws it
+// at screen position (x, y) via Paint_SetPixel.
 // Returns true when the icon was rendered; false = caller should show text.
-static bool dashShowWeatherIcon(int code, uint16_t x, uint16_t y) {
+static bool dashShowWeatherIcon(int code, uint16_t x, uint16_t y,
+                                uint16_t maxW, uint16_t maxH) {
   using namespace DashboardNS;
 
   const char* iconFile = dashWeatherIconFile(code);
@@ -202,22 +214,41 @@ static bool dashShowWeatherIcon(int code, uint16_t x, uint16_t y) {
 
   char path[64];
   snprintf(path, sizeof(path), "%s/%s", DASH_WEATHER_ICON_PATH, iconFile);
-
   if (!SD.exists(path)) return false;
 
   File f = SD.open(path, FILE_READ);
   if (!f) return false;
 
-  size_t bytesRead = f.read(weatherIconBuf, sizeof(weatherIconBuf));
+  size_t bytesRead = f.read(weatherIconBuf, 27200);
   f.close();
 
-  if (bytesRead < sizeof(weatherIconBuf)) {
-    Serial.printf("[DASHBOARD] Icon too small: %s (%d bytes, need %d)\n",
-                  path, (int)bytesRead, (int)sizeof(weatherIconBuf));
+  if (bytesRead < 27200) {
+    Serial.printf("[DASHBOARD] Icon read error: %s (%d/27200 bytes)\n",
+                  path, (int)bytesRead);
     return false;
   }
 
-  EPD_ShowPicture(x, y, DASH_WEATHER_ICON_W, DASH_WEATHER_ICON_H, weatherIconBuf, WHITE);
+  // Source is always 800x272.  Scale to fit bounding box, preserving ratio.
+  const int srcW = 800, srcH = 272;
+  int dstW, dstH;
+  if ((int)maxW * srcH <= (int)maxH * srcW) {
+    dstW = maxW;
+    dstH = (int)maxW * srcH / srcW;
+  } else {
+    dstH = maxH;
+    dstW = (int)maxH * srcW / srcH;
+  }
+
+  // Nearest-neighbour downscale drawn directly into the Paint buffer
+  for (int dy = 0; dy < dstH; dy++) {
+    int sy = dy * srcH / dstH;
+    for (int dx = 0; dx < dstW; dx++) {
+      int sx = dx * srcW / dstW;
+      Paint_SetPixel(x + dx, y + dy,
+                     dashIconGetPixel(weatherIconBuf, sx, sy) ? WHITE : BLACK);
+    }
+  }
+
   return true;
 }
 
@@ -535,7 +566,8 @@ static void dashDrawMainScreen() {
   snprintf(hiloStr, sizeof(hiloStr), "H:%s  L:%s", hiStr, loStr);
 
   // Current conditions: try SD icon first, fall back to ASCII text
-  bool mainIconShown = dashShowWeatherIcon(weatherData.currentCode, 10, y);
+  bool mainIconShown = dashShowWeatherIcon(weatherData.currentCode, 10, y,
+                                           DASH_WEATHER_ICON_W, DASH_WEATHER_ICON_H);
   if (mainIconShown) {
     int tx = 10 + DASH_WEATHER_ICON_W + 8;
     EPD_ShowString(tx,       y,      curTempStr,                                       16, BLACK);
@@ -568,13 +600,14 @@ static void dashDrawMainScreen() {
     EPD_ShowString(x, y, (char*)dayLabel, 16, BLACK);
 
     // Icon or text fallback for each forecast column
-    bool fcIconShown = dashShowWeatherIcon(fc.weatherCode, x, y + 18);
+    bool fcIconShown = dashShowWeatherIcon(fc.weatherCode, x, y + 18,
+                                           DASH_WEATHER_ICON_FC_W, DASH_WEATHER_ICON_FC_H);
     if (!fcIconShown) {
       EPD_ShowString(x, y + 20, (char*)dashWeatherIcon(fc.weatherCode), 16, BLACK);
     }
 
     // Condition and temps – placed below icon or text row
-    int condY = fcIconShown ? (y + 18 + DASH_WEATHER_ICON_H + 2) : (y + 40);
+    int condY = fcIconShown ? (y + 18 + DASH_WEATHER_ICON_FC_H + 2) : (y + 40);
     const char* cond = dashWeatherDesc(fc.weatherCode);
     char condShort[14];
     strncpy(condShort, cond, 13);
