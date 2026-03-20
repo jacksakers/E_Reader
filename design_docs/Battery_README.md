@@ -2,22 +2,21 @@
 
 ## Overview
 
-The E-Ink OS now includes a battery monitoring system that displays the current battery level on the home screen and provides detailed battery information in the Settings menu.
+The E-Ink OS includes a battery monitoring system. Currently it uses the CrowPanel's onboard VBUS divider (R10/R11) on GPIO 3 to detect whether USB power is present, showing **"Charging"** or **"On Battery"** in the header.
 
-## Features
+To get real battery percentage, an external voltage divider must be wired — see [Adding True Battery Monitoring](#adding-true-battery-monitoring) below.
 
-- **Real-time Battery Monitoring**: Reads battery voltage via ADC and displays percentage
-- **Configurable Display**: Toggle between percentage display and icon-only display
-- **Smart Updating**: Updates battery reading every 60 seconds to minimize power consumption
-- **Battery Health Check**: Detects if battery monitoring is working correctly
-- **Low Battery Warnings**: Identifies low (< 20%) and critical (< 10%) battery levels
+## Current Behaviour (USB Detection Only)
+
+- **USB plugged in** → header shows `Charging`
+- **USB unplugged** → header shows `On Battery`
+- Battery percentage is not available without additional hardware
 
 ## Hardware Configuration
 
 ### Default Settings
 
-- **ADC Pin**: GPIO 3 (configurable in Battery.h)
-- **Voltage Divider Ratio**: 2.0:1 (typical for ESP32-S3 boards)
+- **ADC Pin**: GPIO 3 — reads the onboard VBUS divider, used for USB/charging detection only
 - **Battery Type**: 3.7V LiPo (1500mAh)
 - **Voltage Range**: 3.0V (empty) to 4.2V (full)
 
@@ -29,9 +28,61 @@ If your board uses a different GPIO pin for battery monitoring, modify `BATTERY_
 #define BATTERY_ADC_PIN 3  // Change to your board's battery ADC pin
 ```
 
-## Calibration
+## Adding True Battery Monitoring
 
-### Step 1: Verify Voltage Divider Ratio
+The CrowPanel has **no built-in battery voltage sense circuit** — the R10/R11 divider only monitors the USB 5V rail, not the battery. To get real voltage/percentage readings you need to add two resistors externally.
+
+### What You Need
+
+- 2× 100kΩ resistors (same value = 2:1 divider, battery voltage halved, safe for ADC)
+- A free ADC1 GPIO pin (GPIO 8, 9, or 11 are good choices — check nothing uses them in OS_Main.ino)
+- Three short wires
+
+### Wiring
+
+```
+LiPo JST B+ ──┬── R1 (100kΩ) ──┐
+               │                 ├── GND
+               └── GPIO pin ──── R2 (100kΩ) ─┘
+```
+
+Concretely:
+1. Solder one end of **R1** to the **positive pad of the JST BAT connector** on the board (or the B+ pin)
+2. Solder the other end of **R1** to your chosen **GPIO pin** (e.g. GPIO 9)
+3. Solder **R2** between that same GPIO pin and **GND**
+
+The junction of R1 and R2 connects to the GPIO. At 4.2V battery, the GPIO sees 2.1V — safely within the ESP32-S3's ADC range.
+
+### Firmware Changes
+
+Once wired, update [Battery.h](../Battery.h):
+
+```cpp
+#define BATTERY_ADC_PIN 9         // change to your chosen GPIO
+#define VOLTAGE_DIVIDER_RATIO 2.0 // 100k/100k = 2:1
+```
+
+Then re-enable voltage calculation in `batteryUpdate()` and `batteryForceUpdate()` by replacing the USB detection logic with:
+
+```cpp
+float voltage = batteryCalculateVoltage(rawADC);
+int percentage = batteryVoltageToPercentage(voltage);
+lastVoltage = voltage;
+lastPercentage = percentage;
+```
+
+And restore `batteryGetStatusString()` to show `showPercentage ? "%d%%" : icon`.
+
+### Calibration
+
+1. Measure your actual battery voltage with a multimeter
+2. Flash the code and read Serial Monitor: `[BATTERY] FORCED: rawADC=..., ADC_pin=...V`
+3. Correct ratio = `actual_battery_V / ADC_pin_V`
+4. Update `VOLTAGE_DIVIDER_RATIO` if it differs from 2.0
+
+---
+
+## Calibration (Current USB-only mode)
 
 Your board likely has a voltage divider circuit that reduces the battery voltage to a safe range for the ESP32's ADC (0-3.3V). 
 

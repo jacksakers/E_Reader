@@ -18,16 +18,19 @@
 // ====================================================================
 
 // ==================== BATTERY CONFIGURATION ====================
-// GPIO pin for battery voltage reading (through voltage divider)
+// GPIO pin connected to the VBUS voltage divider (R10 1K + R11 10K on the CrowPanel).
+// This pin reads ~0.45V when USB is plugged in and ~0V when running on battery,
+// so it is used for USB/charging detection only — not true battery voltage.
+// See design_docs/Battery_README.md for wiring an external divider for real battery monitoring.
 #define BATTERY_ADC_PIN 3
 
-// Voltage divider ratio for external 100kΩ/10kΩ divider on CrowPanel:
-// ratio = (R1 + R2) / R2 = (100k + 10k) / 10k = 11.0
-// Adjust if you used different resistor values
-#define VOLTAGE_DIVIDER_RATIO 11.0
+// ADC threshold (raw 0-4095) above which USB power is considered present.
+// At 5V USB: rawADC ≈ 785. At 0V (battery only): rawADC ≈ 0. 300 is a safe midpoint.
+#define USB_DETECT_THRESHOLD 300
 
-// ADC configuration for ESP32-S3
-#define ADC_RESOLUTION 4096.0  // 12-bit ADC
+// --- Below settings are for future true battery monitoring (see README) ---
+#define VOLTAGE_DIVIDER_RATIO 2.0  // Update when external divider is wired
+#define ADC_RESOLUTION 4096.0
 #define ADC_REFERENCE_VOLTAGE 2.5  // ESP32-S3 ADC_11db effective range is ~2.5V
 
 // LiPo battery voltage thresholds (in volts)
@@ -49,7 +52,7 @@ namespace BatteryNS {
   static unsigned long lastUpdateTime = 0;
   static bool isInitialized = false;
   
-  // Charging detection (optional - requires hardware support)
+  // USB/charging detection via VBUS divider on GPIO 3
   static bool isCharging = false;
 }
 
@@ -127,22 +130,19 @@ void batteryUpdate() {
   // Read ADC value
   int rawADC = batteryReadRawADC();
   
-  // Calculate voltage
-  float voltage = batteryCalculateVoltage(rawADC);
+  // Detect USB/charging from VBUS divider on GPIO 3
+  isCharging = (rawADC > USB_DETECT_THRESHOLD);
   
-  // Calculate percentage
-  int percentage = batteryVoltageToPercentage(voltage);
-  
-  // Update cached values
-  lastVoltage = voltage;
-  lastPercentage = percentage;
+  // Voltage/percentage are not meaningful without an external battery divider
+  lastVoltage = 0.0;
+  lastPercentage = 0;
   lastUpdateTime = currentTime;
   
   // Debug output (reduce frequency to avoid spam)
   static unsigned long lastDebugPrint = 0;
   if (currentTime - lastDebugPrint > 300000) {  // Print every 5 minutes
-    Serial.printf("[BATTERY] ADC: %d, Voltage: %.2fV, Percentage: %d%%\n", 
-                  rawADC, voltage, percentage);
+    Serial.printf("[BATTERY] ADC: %d, USB/Charging: %s\n",
+                  rawADC, isCharging ? "YES" : "NO");
     lastDebugPrint = currentTime;
   }
 }
@@ -153,15 +153,13 @@ void batteryForceUpdate() {
   lastUpdateTime = 0;  // Reset timer to force update
   
   int rawADC = batteryReadRawADC();
-  float voltage = batteryCalculateVoltage(rawADC);
-  int percentage = batteryVoltageToPercentage(voltage);
-  lastVoltage = voltage;
-  lastPercentage = percentage;
+  isCharging = (rawADC > USB_DETECT_THRESHOLD);
+  lastVoltage = 0.0;
+  lastPercentage = 0;
   lastUpdateTime = millis();
   
-  // Always print on forced update for diagnostics
-  Serial.printf("[BATTERY] FORCED: rawADC=%d, ADC_pin=%.3fV, battery=%.2fV, pct=%d%%\n",
-                rawADC, (rawADC / ADC_RESOLUTION) * ADC_REFERENCE_VOLTAGE, voltage, percentage);
+  Serial.printf("[BATTERY] FORCED: rawADC=%d, USB/Charging: %s\n",
+                rawADC, isCharging ? "YES" : "NO");
 }
 
 // Get current battery voltage
@@ -192,21 +190,10 @@ bool batteryIsCritical() {
 void batteryGetStatusString(char* buffer, size_t bufferSize, bool showPercentage) {
   using namespace BatteryNS;
   
-  if (showPercentage) {
-    snprintf(buffer, bufferSize, "%d%%", lastPercentage);
+  if (isCharging) {
+    snprintf(buffer, bufferSize, "Charging");
   } else {
-    // Icon representation based on percentage
-    if (lastPercentage >= 90) {
-      snprintf(buffer, bufferSize, "[===]");  // Full
-    } else if (lastPercentage >= 60) {
-      snprintf(buffer, bufferSize, "[== ]");  // Good
-    } else if (lastPercentage >= 30) {
-      snprintf(buffer, bufferSize, "[=  ]");  // Medium
-    } else if (lastPercentage >= 10) {
-      snprintf(buffer, bufferSize, "[!  ]");  // Low
-    } else {
-      snprintf(buffer, bufferSize, "[!! ]");  // Critical
-    }
+    snprintf(buffer, bufferSize, "On Battery");
   }
 }
 
@@ -234,13 +221,10 @@ bool batteryIsHealthy() {
   return true;
 }
 
-// Optional: Detect if battery is charging (requires charging detection circuit)
-// On some boards, this might be connected to a different GPIO
+// Returns true when USB power is detected via the VBUS divider on GPIO 3
 bool batteryIsCharging() {
   using namespace BatteryNS;
-  // TODO: Implement if your hardware has charging detection
-  // For example: return digitalRead(CHARGE_STATUS_PIN) == LOW;
-  return false;  // Placeholder
+  return isCharging;
 }
 
 #endif // BATTERY_H
