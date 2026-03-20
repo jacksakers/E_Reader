@@ -44,6 +44,15 @@ namespace SettingsNS {
     // UI settings
     bool showBatteryPercent;        // Show battery % on home screen
     bool enableSounds;              // Enable button feedback sounds (if hardware supports)
+
+    // Smart Dashboard settings
+    bool dashWeatherEnabled;        // Fetch weather data
+    int  dashLatitudeX100;          // Latitude  * 100 (e.g. 4071 = 40.71°N)
+    int  dashLongitudeX100;         // Longitude * 100 (e.g. -7401 = 74.01°W)
+    int  dashTimezoneOffset;        // UTC offset in whole hours (-12 to +14)
+    int  dashUpdateHour1;           // First  daily weather-fetch hour (0-23)
+    int  dashUpdateHour2;           // Second daily weather-fetch hour (0-23, -1 = disabled)
+    bool dashUseFahrenheit;         // Display temperatures in °F instead of °C
   };
   
   // Default settings
@@ -61,7 +70,16 @@ namespace SettingsNS {
     "YourWiFiPass",  // wifiSTAPassword
     true,            // wifiEnabled
     true,            // showBatteryPercent
-    false            // enableSounds
+    false,           // enableSounds
+
+    // Smart Dashboard defaults
+    true,            // dashWeatherEnabled
+    3399,            // dashLatitudeX100  (33.99 = West Columbia, SC)
+    -8107,           // dashLongitudeX100 (-81.07 = West Columbia, SC)
+    -5,              // dashTimezoneOffset (EST / UTC-5)
+    6,               // dashUpdateHour1 (6 AM)
+    18,              // dashUpdateHour2 (6 PM)
+    false            // dashUseFahrenheit
   };
   
   static bool settingsLoaded = false;
@@ -76,6 +94,7 @@ namespace SettingsNS {
     SETTINGS_WIFI_OPTIONS,
     SETTINGS_EREADER_OPTIONS,
     SETTINGS_ARTFRAME_OPTIONS,
+    SETTINGS_DASHBOARD_OPTIONS,
     SETTINGS_KITTALIEN_OPTIONS
   };
   
@@ -149,7 +168,15 @@ bool parseSettingsLine(const char* line) {
   else if (strcmp(key, "wifiEnabled") == 0) currentSettings.wifiEnabled = (atoi(value) != 0);
   else if (strcmp(key, "showBatteryPercent") == 0) currentSettings.showBatteryPercent = (atoi(value) != 0);
   else if (strcmp(key, "enableSounds") == 0) currentSettings.enableSounds = (atoi(value) != 0);
-  
+  // Smart Dashboard
+  else if (strcmp(key, "dashWeatherEnabled") == 0) currentSettings.dashWeatherEnabled = (atoi(value) != 0);
+  else if (strcmp(key, "dashLatitudeX100")   == 0) currentSettings.dashLatitudeX100   = atoi(value);
+  else if (strcmp(key, "dashLongitudeX100")  == 0) currentSettings.dashLongitudeX100  = atoi(value);
+  else if (strcmp(key, "dashTimezoneOffset") == 0) currentSettings.dashTimezoneOffset = atoi(value);
+  else if (strcmp(key, "dashUpdateHour1")    == 0) currentSettings.dashUpdateHour1    = atoi(value);
+  else if (strcmp(key, "dashUpdateHour2")    == 0) currentSettings.dashUpdateHour2    = atoi(value);
+  else if (strcmp(key, "dashUseFahrenheit")  == 0) currentSettings.dashUseFahrenheit  = (atoi(value) != 0);
+
   return true;
 }
 
@@ -219,7 +246,15 @@ bool saveSettings() {
   file.printf("wifiEnabled=%d\n", currentSettings.wifiEnabled ? 1 : 0);
   file.printf("showBatteryPercent=%d\n", currentSettings.showBatteryPercent ? 1 : 0);
   file.printf("enableSounds=%d\n", currentSettings.enableSounds ? 1 : 0);
-  
+  // Smart Dashboard
+  file.printf("dashWeatherEnabled=%d\n", currentSettings.dashWeatherEnabled ? 1 : 0);
+  file.printf("dashLatitudeX100=%d\n",   currentSettings.dashLatitudeX100);
+  file.printf("dashLongitudeX100=%d\n",  currentSettings.dashLongitudeX100);
+  file.printf("dashTimezoneOffset=%d\n", currentSettings.dashTimezoneOffset);
+  file.printf("dashUpdateHour1=%d\n",    currentSettings.dashUpdateHour1);
+  file.printf("dashUpdateHour2=%d\n",    currentSettings.dashUpdateHour2);
+  file.printf("dashUseFahrenheit=%d\n",  currentSettings.dashUseFahrenheit ? 1 : 0);
+
   file.close();
   
   Serial.printf("[SETTINGS] Settings saved (%d bytes)\n", file.size());
@@ -342,10 +377,11 @@ void settingsDrawMainMenu() {
     "WiFi Options",
     "E-Reader Options",
     "Art Frame Options",
+    "Dashboard Options",
     "Kittalien Options",
     "Save & Exit"
   };
-  const int numItems = 9;
+  const int numItems = 10;
   
   int startY = 45;
   int itemHeight = 25;
@@ -677,6 +713,165 @@ void settingsDrawWiFiOptions() {
   needsRefresh = false;
 }
 
+// ==================== DASHBOARD OPTIONS ====================
+
+void settingsDrawDashboardOptions() {
+  using namespace SettingsNS;
+
+  Paint_Clear(WHITE);
+  settingsDrawHeader("Dashboard Options");
+
+  int startY    = 45;
+  int lineHeight = 22;
+  int line       = 0;
+
+  // 0: Weather enabled
+  const char* wxText = currentSettings.dashWeatherEnabled
+                       ? "Weather: Enabled" : "Weather: Disabled";
+  settingsDrawItem(0, startY + (line++ * lineHeight), wxText, true);
+
+  // 1: Latitude
+  char latText[40];
+  float lat = currentSettings.dashLatitudeX100 / 100.0f;
+  snprintf(latText, sizeof(latText), "Latitude : %+.2f deg", lat);
+  settingsDrawItem(1, startY + (line++ * lineHeight), latText, true);
+
+  // 2: Longitude
+  char lonText[40];
+  float lon = currentSettings.dashLongitudeX100 / 100.0f;
+  snprintf(lonText, sizeof(lonText), "Longitude: %+.2f deg", lon);
+  settingsDrawItem(2, startY + (line++ * lineHeight), lonText, true);
+
+  // 3: Timezone
+  char tzText[32];
+  int tz = currentSettings.dashTimezoneOffset;
+  snprintf(tzText, sizeof(tzText), "Timezone : UTC%+d", tz);
+  settingsDrawItem(3, startY + (line++ * lineHeight), tzText, true);
+
+  // 4: Update hour 1
+  char h1Text[32];
+  snprintf(h1Text, sizeof(h1Text), "Fetch Hour 1: %02d:00", currentSettings.dashUpdateHour1);
+  settingsDrawItem(4, startY + (line++ * lineHeight), h1Text, true);
+
+  // 5: Update hour 2
+  char h2Text[40];
+  if (currentSettings.dashUpdateHour2 < 0) {
+    strncpy(h2Text, "Fetch Hour 2: Disabled", sizeof(h2Text));
+  } else {
+    snprintf(h2Text, sizeof(h2Text), "Fetch Hour 2: %02d:00", currentSettings.dashUpdateHour2);
+  }
+  settingsDrawItem(5, startY + (line++ * lineHeight), h2Text, true);
+
+  // 6: Units
+  const char* unitText = currentSettings.dashUseFahrenheit
+                         ? "Units: Fahrenheit" : "Units: Celsius";
+  settingsDrawItem(6, startY + (line++ * lineHeight), unitText, true);
+
+  // 7: Back
+  settingsDrawItem(7, startY + (line++ * lineHeight), "Back to Main Menu", false);
+
+  if (isEditingValue) {
+    settingsDrawFooter("UP/DOWN: Adjust  OK: Confirm  EXIT: Cancel");
+  } else {
+    settingsDrawFooter("UP/DOWN: Navigate  OK: Edit/Toggle  EXIT: Back");
+  }
+
+  EPD_Display(ImageBW);
+  EPD_PartUpdate();
+  needsRefresh = false;
+}
+
+void settingsHandleDashboardOptionsInput(bool upPressed, bool downPressed, bool okPressed) {
+  using namespace SettingsNS;
+
+  const int NUM_ITEMS = 8;  // items 0-7
+
+  if (isEditingValue) {
+    if (okPressed) {
+      isEditingValue = false;
+      needsRefresh   = true;
+      return;
+    }
+    if (!upPressed && !downPressed) return;
+
+    switch (selectedItem) {
+      case 0: // Weather toggle
+        currentSettings.dashWeatherEnabled = !currentSettings.dashWeatherEnabled;
+        break;
+
+      case 1: // Latitude ±1.00 degree step
+        if (upPressed)  currentSettings.dashLatitudeX100 += 100;
+        else            currentSettings.dashLatitudeX100 -= 100;
+        // clamp to ±90°
+        if (currentSettings.dashLatitudeX100 >  9000) currentSettings.dashLatitudeX100 =  9000;
+        if (currentSettings.dashLatitudeX100 < -9000) currentSettings.dashLatitudeX100 = -9000;
+        break;
+
+      case 2: // Longitude ±1.00 degree step
+        if (upPressed)  currentSettings.dashLongitudeX100 += 100;
+        else            currentSettings.dashLongitudeX100 -= 100;
+        // clamp to ±180°
+        if (currentSettings.dashLongitudeX100 >  18000) currentSettings.dashLongitudeX100 =  18000;
+        if (currentSettings.dashLongitudeX100 < -18000) currentSettings.dashLongitudeX100 = -18000;
+        break;
+
+      case 3: // Timezone -12..+14
+        if (upPressed)  currentSettings.dashTimezoneOffset++;
+        else            currentSettings.dashTimezoneOffset--;
+        if (currentSettings.dashTimezoneOffset >  14) currentSettings.dashTimezoneOffset =  14;
+        if (currentSettings.dashTimezoneOffset < -12) currentSettings.dashTimezoneOffset = -12;
+        break;
+
+      case 4: // Update Hour 1  0-23
+        if (upPressed)  currentSettings.dashUpdateHour1 = (currentSettings.dashUpdateHour1 + 1) % 24;
+        else            currentSettings.dashUpdateHour1 = (currentSettings.dashUpdateHour1 + 23) % 24;
+        break;
+
+      case 5: // Update Hour 2  -1 (disabled) or 0-23
+        if (upPressed) {
+          if (currentSettings.dashUpdateHour2 < 0) currentSettings.dashUpdateHour2 = 0;
+          else currentSettings.dashUpdateHour2 = (currentSettings.dashUpdateHour2 + 1) % 24;
+        } else {
+          if (currentSettings.dashUpdateHour2 == 0) currentSettings.dashUpdateHour2 = -1;
+          else if (currentSettings.dashUpdateHour2 < 0) currentSettings.dashUpdateHour2 = 23;
+          else currentSettings.dashUpdateHour2--;
+        }
+        break;
+
+      case 6: // Units toggle
+        currentSettings.dashUseFahrenheit = !currentSettings.dashUseFahrenheit;
+        break;
+
+      default: break;
+    }
+    needsRefresh = true;
+
+  } else {
+    // Navigation mode
+    if (upPressed) {
+      selectedItem--;
+      if (selectedItem < 0) selectedItem = NUM_ITEMS - 1;
+      needsRefresh = true;
+    }
+    if (downPressed) {
+      selectedItem++;
+      if (selectedItem >= NUM_ITEMS) selectedItem = 0;
+      needsRefresh = true;
+    }
+    if (okPressed) {
+      if (selectedItem == NUM_ITEMS - 1) {
+        // Back
+        currentMode  = SETTINGS_MAIN_MENU;
+        selectedItem = 0;
+        needsRefresh = true;
+      } else {
+        isEditingValue = true;
+        needsRefresh   = true;
+      }
+    }
+  }
+}
+
 // ==================== KITTALIEN OPTIONS ====================
 
 void settingsDrawKittalienOptions() {
@@ -737,13 +932,13 @@ void settingsHandleMainMenuInput(bool upPressed, bool downPressed, bool okPresse
   
   if (upPressed) {
     selectedItem--;
-    if (selectedItem < 0) selectedItem = 8;
+    if (selectedItem < 0) selectedItem = 9;
     needsRefresh = true;
   }
   
   if (downPressed) {
     selectedItem++;
-    if (selectedItem > 8) selectedItem = 0;
+    if (selectedItem > 9) selectedItem = 0;
     needsRefresh = true;
   }
   
@@ -791,13 +986,19 @@ void settingsHandleMainMenuInput(bool upPressed, bool downPressed, bool okPresse
         needsRefresh = true;
         break;
         
-      case 7: // Kittalien Options
+      case 7: // Dashboard Options
+        currentMode = SETTINGS_DASHBOARD_OPTIONS;
+        selectedItem = 0;
+        needsRefresh = true;
+        break;
+
+      case 8: // Kittalien Options
         currentMode = SETTINGS_KITTALIEN_OPTIONS;
         selectedItem = 0;
         needsRefresh = true;
         break;
         
-      case 8: // Save & Exit
+      case 9: // Save & Exit
         saveSettings();
         // Return handled by main loop
         break;
@@ -1249,6 +1450,10 @@ void settingsUpdate() {
       settingsDrawArtFrameOptions();
       break;
 
+    case SETTINGS_DASHBOARD_OPTIONS:
+      settingsDrawDashboardOptions();
+      break;
+
     case SETTINGS_KITTALIEN_OPTIONS:
       if (confirmKittalienReset) {
         settingsDrawKittalienResetConfirm();
@@ -1329,6 +1534,10 @@ void settingsHandleInput(bool upPressed, bool downPressed, bool okPressed, bool 
       settingsHandleArtFrameOptionsInput(upPressed, downPressed, okPressed);
       break;
 
+    case SETTINGS_DASHBOARD_OPTIONS:
+      settingsHandleDashboardOptionsInput(upPressed, downPressed, okPressed);
+      break;
+
     case SETTINGS_KITTALIEN_OPTIONS:
       settingsHandleKittalienOptionsInput(upPressed, downPressed, okPressed);
       break;
@@ -1405,6 +1614,36 @@ bool settingsGetShowBatteryPercent() {
 
 bool settingsGetEnableSounds() {
   return SettingsNS::currentSettings.enableSounds;
+}
+
+// ==================== SMART DASHBOARD GETTERS ====================
+
+bool settingsGetDashWeatherEnabled() {
+  return SettingsNS::currentSettings.dashWeatherEnabled;
+}
+
+float settingsGetDashLatitude() {
+  return SettingsNS::currentSettings.dashLatitudeX100 / 100.0f;
+}
+
+float settingsGetDashLongitude() {
+  return SettingsNS::currentSettings.dashLongitudeX100 / 100.0f;
+}
+
+int settingsGetDashTimezoneOffset() {
+  return SettingsNS::currentSettings.dashTimezoneOffset;
+}
+
+int settingsGetDashUpdateHour1() {
+  return SettingsNS::currentSettings.dashUpdateHour1;
+}
+
+int settingsGetDashUpdateHour2() {
+  return SettingsNS::currentSettings.dashUpdateHour2;
+}
+
+bool settingsGetDashUseFahrenheit() {
+  return SettingsNS::currentSettings.dashUseFahrenheit;
 }
 
 #endif // SETTINGS_H

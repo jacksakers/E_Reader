@@ -11,6 +11,7 @@
 #include "Kittalien.h"
 #include "Battery.h"
 #include "HttpReader.h"
+#include "SmartDashboard.h"
 
 // ==================== PIN DEFINITIONS ====================
 #define SCREEN_PWR 7         // Screen power pin
@@ -133,6 +134,10 @@ void setup() {
   initializePersistentStorage();
   loadSettings();
   
+  // Attempt a background NTP time-sync if WiFi STA is configured.
+  // Non-blocking on failure – the clock just shows "--:--" until synced.
+  dashBackgroundTimeSync();
+
   currentMode = MODE_HOME;
   needsRedraw = true;
   
@@ -149,6 +154,11 @@ void loop() {
   
   // Update battery readings periodically
   batteryUpdate();
+
+  // Advance the home-screen clock once per minute (when time is synced)
+  if (currentMode == MODE_HOME && dashCheckMinuteChanged()) {
+    needsRedraw = true;
+  }
   
   switch (currentMode) {
     case MODE_HOME:
@@ -235,6 +245,11 @@ void displayHomeScreen() {
   EPD_DrawLine(0, 30, 792, 30, BLACK);
   EPD_ShowString(10, 5, (char*)"Paper Pal", 16, BLACK);
   
+  // Time display (center of header; shows --:-- until NTP synced)
+  char timeStr[8];
+  dashGetShortTimeString(timeStr, sizeof(timeStr));
+  EPD_ShowString(370, 5, timeStr, 16, BLACK);
+
   // Battery indicator
   char batteryStr[16];
   bool showPercent = settingsGetShowBatteryPercent();
@@ -323,6 +338,7 @@ void launchMode(int modeIndex) {
       
     case 2: // Smart Dashboard
       currentMode = MODE_DASHBOARD;
+      dashboardInit();
       break;
       
     case 3: // Art Frame
@@ -464,20 +480,32 @@ void runHttpReaderMode() {
 
 // ==================== DASHBOARD MODE ====================
 void runDashboardMode() {
-  Paint_Clear(WHITE);
-  EPD_ShowString(100, 100, (char*)"SMART DASHBOARD", 16, BLACK);
-  EPD_ShowString(100, 130, (char*)"Coming Soon!", 16, BLACK);
-  EPD_ShowString(100, 160, (char*)"Press EXIT to return", 16, BLACK);
-  EPD_Display(ImageBW);
-  EPD_PartUpdate();
-  
-  while (true) {
-    buttons->update();
-    if (buttons->exit()->wasPressed() || buttons->home()->wasPressed()) {
-      returnToHome();
-      return;
-    }
-    delay(10);
+  dashboardUpdate();
+
+  delay(20);
+
+  bool okPressed   = buttons->ok()->wasPressed();
+  bool exitPressed = buttons->exit()->wasPressed();
+  bool homePressed = buttons->home()->wasPressed();
+
+  if (homePressed) {
+    Serial.println("[OS] Exiting Dashboard to home...");
+    dashboardCleanup();
+    returnToHome();
+    return;
+  }
+
+  bool stayInMode = dashboardHandleInput(
+    buttons->prv()->wasPressed(),
+    buttons->next()->wasPressed(),
+    okPressed,
+    exitPressed
+  );
+
+  if (!stayInMode) {
+    Serial.println("[OS] Dashboard requested exit to home");
+    dashboardCleanup();
+    returnToHome();
   }
 }
 
