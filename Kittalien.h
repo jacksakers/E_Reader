@@ -98,7 +98,7 @@ namespace KittalienNS {
   
   // Action descriptions
   static const char* actionDescriptions[] = {
-    "Give food (+Hunger)",
+    "Give food (+Hunger, +Energy)",
     "Play game (+Happy, -Energy)",
     "Pet gently (+Happy)"
   };
