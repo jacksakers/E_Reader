@@ -17,6 +17,7 @@
 
 // Action effects
 #define KITTALIEN_FEED_AMOUNT 10
+#define KITTALIEN_FEED_ENERGY 5
 #define KITTALIEN_PLAY_HAPPINESS 15
 #define KITTALIEN_PLAY_ENERGY_COST 20
 #define KITTALIEN_PET_HAPPINESS 10
@@ -72,9 +73,6 @@ namespace KittalienNS {
   static PetStats pet;
   static int selectedAction = 0;
   static bool needsRefresh = true;
-  static String statusMessage = "";
-  static unsigned long messageDisplayTime = 0;
-  static bool showingMessage = false;
 
   // Action image state
   static String actionImage = "";
@@ -378,24 +376,20 @@ void executeAction(KittalienNS::Action action) {
   switch (action) {
     case ACTION_FEED:
       pet.hunger += KITTALIEN_FEED_AMOUNT;
+      pet.energy += KITTALIEN_FEED_ENERGY;
       pet.hunger = clamp(pet.hunger, KITTALIEN_MIN_STAT, KITTALIEN_MAX_STAT);
-      statusMessage = "Fed Kittalien! (+Hunger)";
+      pet.energy = clamp(pet.energy, KITTALIEN_MIN_STAT, KITTALIEN_MAX_STAT);
       actionImage = "eating_kittalien.art";
       showingActionImage = true;
       actionImageStartTime = millis();
       break;
 
     case ACTION_PLAY:
-      if (pet.isSleeping) {
-        statusMessage = "Kittalien is asleep!";
-      } else if (pet.energy < KITTALIEN_PLAY_ENERGY_COST) {
-        statusMessage = "Too tired to play!";
-      } else {
+      if (!pet.isSleeping && pet.energy >= KITTALIEN_PLAY_ENERGY_COST) {
         pet.happiness += KITTALIEN_PLAY_HAPPINESS;
         pet.energy -= KITTALIEN_PLAY_ENERGY_COST;
         pet.happiness = clamp(pet.happiness, KITTALIEN_MIN_STAT, KITTALIEN_MAX_STAT);
         pet.energy = clamp(pet.energy, KITTALIEN_MIN_STAT, KITTALIEN_MAX_STAT);
-        statusMessage = "Played fun game! (+Happy, -Energy)";
         actionImage = "playing_kittalien.art";
         showingActionImage = true;
         actionImageStartTime = millis();
@@ -405,7 +399,6 @@ void executeAction(KittalienNS::Action action) {
     case ACTION_PET:
       pet.happiness += KITTALIEN_PET_HAPPINESS;
       pet.happiness = clamp(pet.happiness, KITTALIEN_MIN_STAT, KITTALIEN_MAX_STAT);
-      statusMessage = "Petted softly! (+Happy)";
       actionImage = "pet_kittalien.art";
       showingActionImage = true;
       actionImageStartTime = millis();
@@ -417,10 +410,7 @@ void executeAction(KittalienNS::Action action) {
   
   // Save state
   savePetState();
-  
-  // Show message
-  showingMessage = true;
-  messageDisplayTime = millis();
+
   needsRefresh = true;
   
   Serial.printf("[KITTALIEN] After action: H=%d, Ha=%d, E=%d\n", 
@@ -593,13 +583,6 @@ void kittalienDrawScreen() {
     startIdx = endIdx;
   }
   
-  // Status message box (if showing)
-  if (showingMessage) {
-    EPD_DrawRectangle(200, 200, 590, 250, WHITE, 1);
-    EPD_DrawRectangle(200, 200, 590, 250, BLACK, 0);
-    EPD_ShowString(220, 220, (char*)statusMessage.c_str(), 16, BLACK);
-  }
-  
   // Controls footer
   EPD_DrawRectangle(0, 245, 791, 271, BLACK, 0);
   for (int i = 0; i < 2; i++) {
@@ -655,19 +638,14 @@ void kittalienHandleInput(bool upPressed, bool downPressed, bool okPressed, bool
 void kittalienUpdate() {
   using namespace KittalienNS;
 
+  static unsigned long lastDecayCheck = 0;
   unsigned long currentTime = millis();
 
-  // Hide message after timeout
-  if (showingMessage) {
-    // Handle millis() overflow
-    if (currentTime < messageDisplayTime) {
-      messageDisplayTime = currentTime;
-    }
-    if (currentTime - messageDisplayTime >= KITTALIEN_UI_TIMEOUT) {
-      showingMessage = false;
-      needsRefresh = true;
-      Serial.println("[KITTALIEN] Hiding status message");
-    }
+  // Periodically apply time decay and re-evaluate state so the image updates
+  if (currentTime - lastDecayCheck >= 60000UL) {
+    lastDecayCheck = currentTime;
+    applyTimeDecay();
+    updatePetState();
   }
 
   // Hide action image after timeout
@@ -718,14 +696,10 @@ void kittalienInit() {
   // Reset UI state
   selectedAction = 0;
   needsRefresh = true;
-  showingMessage = false;
   showingActionImage = false;
   
-  // Show welcome message for new pets
+  // Mark new pet as seen
   if (pet.isNewPet) {
-    statusMessage = "Welcome to Kittalien!";
-    showingMessage = true;
-    messageDisplayTime = millis();
     pet.isNewPet = false;
     savePetState();
   }
