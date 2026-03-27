@@ -12,6 +12,7 @@
 #include "Battery.h"
 #include "HttpReader.h"
 #include "SmartDashboard.h"
+#include "DailyProgress.h"
 
 // ==================== PIN DEFINITIONS ====================
 #define SCREEN_PWR 7         // Screen power pin
@@ -49,15 +50,21 @@ enum SystemMode {
   MODE_ARTFRAME,
   MODE_WEBPORTAL,
   MODE_KITTALIEN,
-  MODE_SETTINGS
+  MODE_SETTINGS,
+  MODE_PROGRESS
 };
 
 SystemMode currentMode = MODE_HOME;
 int selectedMenuItem = 0;
+int homeScrollOffset = 0;   // index of first visible menu item
 bool needsRedraw = true;
 
+// ==================== HOME MENU DISPLAY CONFIG ====================
+#define HOME_ITEMS_VISIBLE 6   // number of menu rows shown at once
+#define HOME_ITEM_HEIGHT   32  // pixels per row
+
 // ==================== MODE MENU ====================
-const int NUM_MODES = 8;
+const int NUM_MODES = 9;
 const char* modeNames[] = {
   "E-Reader",
   "HTTP Reader",
@@ -66,6 +73,7 @@ const char* modeNames[] = {
   "Web Portal",
   "Kittalien Pet",
   "Settings",
+  "Daily Progress",
   "Sleep"
 };
 
@@ -77,6 +85,7 @@ const char* modeDescriptions[] = {
   "File upload via WiFi",
   "Virtual pet game",
   "System configuration",
+  "Year, month, week, workday bars",
   "Enter deep sleep"
 };
 
@@ -100,6 +109,7 @@ void runArtFrameMode();
 void runWebPortalMode();
 void runKittalienMode();
 void runSettingsMode();
+void runProgressMode();
 void enterDeepSleep();
 
 // ==================== SETUP ====================
@@ -196,6 +206,10 @@ void loop() {
     case MODE_SETTINGS:
       runSettingsMode();
       break;
+
+    case MODE_PROGRESS:
+      runProgressMode();
+      break;
   }
   
   delay(10);  // Small delay for responsiveness
@@ -256,28 +270,37 @@ void displayHomeScreen() {
   batteryGetStatusString(batteryStr, sizeof(batteryStr), showPercent);
   EPD_ShowString(700, 5, batteryStr, 16, BLACK);
   
-  // Menu items
+  // Menu items — scrolling window
   int startY = 35;
-  int itemHeight = 25;  // Sized to fit all 8 items within the 272px display
-  
-  for (int i = 0; i < NUM_MODES; i++) {
-    int yPos = startY + (i * itemHeight);
-    
+
+  for (int i = 0; i < HOME_ITEMS_VISIBLE; i++) {
+    int modeIdx = homeScrollOffset + i;
+    if (modeIdx >= NUM_MODES) break;
+
+    int yPos = startY + (i * HOME_ITEM_HEIGHT);
+    int textY = yPos + (HOME_ITEM_HEIGHT - 16) / 2;  // vertically centre 16-px text
+
     // Selection indicator
-    if (i == selectedMenuItem) {
-      EPD_DrawRectangle(5, yPos - 2, 787, yPos + 30, BLACK, 0);
-      EPD_ShowString(15, yPos, (char*)"> ", 16, BLACK);
-    } else {
-      EPD_ShowString(15, yPos, (char*)"  ", 16, BLACK);
+    if (modeIdx == selectedMenuItem) {
+      EPD_DrawRectangle(5, yPos, 787, yPos + HOME_ITEM_HEIGHT - 1, BLACK, 0);
+      EPD_ShowString(12, textY, (char*)">", 16, BLACK);
     }
-    
+
     // Mode name
-    EPD_ShowString(35, yPos, (char*)modeNames[i], 16, BLACK);
-    
-    // Mode description (smaller)
-    EPD_ShowString(250, yPos + 2, (char*)modeDescriptions[i], 16, BLACK);
+    EPD_ShowString(28, textY, (char*)modeNames[modeIdx], 16, BLACK);
+
+    // Mode description
+    EPD_ShowString(250, textY, (char*)modeDescriptions[modeIdx], 16, BLACK);
   }
-  
+
+  // Scroll arrows
+  if (homeScrollOffset > 0) {
+    EPD_ShowString(774, 36, (char*)"^", 16, BLACK);
+  }
+  if (homeScrollOffset + HOME_ITEMS_VISIBLE < NUM_MODES) {
+    EPD_ShowString(774, startY + HOME_ITEMS_VISIBLE * HOME_ITEM_HEIGHT - 20, (char*)"v", 16, BLACK);
+  }
+
   // Footer instructions
   EPD_DrawLine(0, 245, 792, 245, BLACK);
   EPD_ShowString(10, 250, (char*)"UP/DOWN: Navigate  OK: Select  HOME: Refresh", 16, BLACK);
@@ -295,26 +318,32 @@ void handleHomeNavigation() {
     selectedMenuItem++;
     if (selectedMenuItem >= NUM_MODES) {
       selectedMenuItem = 0;
+      homeScrollOffset = 0;  // wrap to top
+    } else if (selectedMenuItem >= homeScrollOffset + HOME_ITEMS_VISIBLE) {
+      homeScrollOffset = selectedMenuItem - HOME_ITEMS_VISIBLE + 1;
     }
     needsRedraw = true;
     Serial.printf("[HOME] Selected: %s\n", modeNames[selectedMenuItem]);
   }
-  
+
   // Navigate up
   else if (buttons->prv()->wasPressed()) {
     selectedMenuItem--;
     if (selectedMenuItem < 0) {
       selectedMenuItem = NUM_MODES - 1;
+      homeScrollOffset = max(0, NUM_MODES - HOME_ITEMS_VISIBLE);  // wrap to bottom
+    } else if (selectedMenuItem < homeScrollOffset) {
+      homeScrollOffset = selectedMenuItem;
     }
     needsRedraw = true;
     Serial.printf("[HOME] Selected: %s\n", modeNames[selectedMenuItem]);
   }
-  
+
   // Select / Launch mode
   else if (buttons->ok()->wasPressed()) {
     launchMode(selectedMenuItem);
   }
-  
+
   // Refresh home screen
   else if (buttons->home()->wasPressed()) {
     needsRedraw = true;
@@ -359,8 +388,13 @@ void launchMode(int modeIndex) {
       currentMode = MODE_SETTINGS;
       settingsInit();
       break;
-      
-    case 7: // Sleep
+
+    case 7: // Daily Progress
+      currentMode = MODE_PROGRESS;
+      progressInit();
+      break;
+
+    case 8: // Sleep
       enterDeepSleep();
       break;
   }
@@ -634,6 +668,30 @@ void runSettingsMode() {
     returnToHome();
   } else {
     settingsHandleInput(upPressed, downPressed, okPressed, exitPressed);
+  }
+}
+
+// ==================== DAILY PROGRESS MODE ====================
+void runProgressMode() {
+  progressUpdate();
+  delay(20);
+
+  bool upPressed   = buttons->prv()->wasPressed();
+  bool downPressed = buttons->next()->wasPressed();
+  bool okPressed   = buttons->ok()->wasPressed();
+  bool exitPressed = buttons->exit()->wasPressed();
+  bool homePressed = buttons->home()->wasPressed();
+
+  if (homePressed) {
+    Serial.println("[OS] Exiting Daily Progress to home...");
+    returnToHome();
+    return;
+  }
+
+  bool stayInMode = progressHandleInput(upPressed, downPressed, okPressed, exitPressed);
+  if (!stayInMode) {
+    Serial.println("[OS] Daily Progress requested exit to home");
+    returnToHome();
   }
 }
 
