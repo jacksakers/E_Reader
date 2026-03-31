@@ -28,7 +28,7 @@ namespace SettingsNS {
     
     // E-Reader settings
     int progressSaveFrequency;      // Save progress every N scrolls
-    int fontSize;                   // Font size (16, 24, 32)
+    int fontSize;                   // Font size (12, 16, 24)
     
     // Display settings
     int rotation;                   // Screen rotation (0, 90, 180, 270)
@@ -1193,15 +1193,15 @@ void settingsHandleEReaderOptionsInput(bool upPressed, bool downPressed, bool ok
       needsRefresh = true;
     } else if (upPressed || downPressed) {
       switch (selectedItem) {
-        case 0: // Font size
+        case 0: // Font size (valid EPD sizes: 12, 16, 24)
           if (upPressed) {
-            if (currentSettings.fontSize == 16) currentSettings.fontSize = 24;
-            else if (currentSettings.fontSize == 24) currentSettings.fontSize = 32;
-            else currentSettings.fontSize = 16;
+            if (currentSettings.fontSize == 12) currentSettings.fontSize = 16;
+            else if (currentSettings.fontSize == 16) currentSettings.fontSize = 24;
+            else currentSettings.fontSize = 12;
           } else {
-            if (currentSettings.fontSize == 32) currentSettings.fontSize = 24;
-            else if (currentSettings.fontSize == 24) currentSettings.fontSize = 16;
-            else currentSettings.fontSize = 32;
+            if (currentSettings.fontSize == 24) currentSettings.fontSize = 16;
+            else if (currentSettings.fontSize == 16) currentSettings.fontSize = 12;
+            else currentSettings.fontSize = 24;
           }
           needsRefresh = true;
           break;

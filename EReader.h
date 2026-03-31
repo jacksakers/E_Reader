@@ -47,6 +47,26 @@ namespace EReaderNS {
   
   // Progress tracking
   static int scrollsSinceLastSave = 0;  // Counter for periodic saves
+  static int lastFontSize = 0;          // Tracks font size for line-index rebuild detection
+}
+
+// ==================== DYNAMIC LAYOUT HELPERS ====================
+// Screen: 792 wide, 272 tall. Top margin: 45, Bottom margin: 30, Left margin: 10.
+// EPD character width = fontSize/2, height = fontSize (sizes 12, 16, 24 supported).
+
+int eReaderGetCharsPerLine() {
+  int fontSize = settingsGetFontSize();
+  int charWidth = fontSize / 2;
+  // Subtract left margin and one extra char-width as right margin for safety
+  return (792 - EREADER_LEFT_MARGIN - charWidth) / charWidth;
+}
+
+int eReaderGetLineHeight() {
+  return settingsGetFontSize() + 2;  // Small gap between lines
+}
+
+int eReaderGetLinesPerPage() {
+  return (EREADER_MAX_Y - EREADER_TOP_MARGIN) / eReaderGetLineHeight();
 }
 
 // ==================== TEXT PROCESSING ====================
@@ -76,7 +96,8 @@ void eReaderBuildLineIndex() {
   size_t pos = 0;
   int linesProcessed = 0;
   const int MAX_LINES = 10000;  // Safety limit
-  
+  const int charsPerLine = eReaderGetCharsPerLine();
+
   while (pos < fileSize && linesProcessed < MAX_LINES) {
     // Progress update every 1000 lines
     if (linesProcessed > 0 && linesProcessed % 1000 == 0) {
@@ -91,7 +112,7 @@ void eReaderBuildLineIndex() {
     bool foundNewline = false;
     
     // Find line break (word wrap or newline)
-    while (charCount < EREADER_CHARS_PER_LINE && lineEnd < fileSize) {
+    while (charCount < charsPerLine && lineEnd < fileSize) {
       char c = fileBuffer[lineEnd];
       
       // Handle newline
@@ -117,7 +138,7 @@ void eReaderBuildLineIndex() {
     }
     
     // If we hit the character limit without a newline
-    if (!foundNewline && lineEnd < fileSize && charCount >= EREADER_CHARS_PER_LINE) {
+    if (!foundNewline && lineEnd < fileSize && charCount >= charsPerLine) {
       // Try to break at last space for word wrap
       if (lastSpace > pos && (lineEnd - lastSpace) < 20) {
         lineEnd = lastSpace + 1;  // Break after the space
@@ -275,16 +296,28 @@ void eReaderDisplayPage() {
     return;
   }
   
+  // If the font size changed since the line index was built, rebuild it
+  int fontSize = settingsGetFontSize();
+  if (fontSize != lastFontSize && lastFontSize != 0) {
+    Serial.printf("[EREADER] Font size changed (%d -> %d), rebuilding line index\n", lastFontSize, fontSize);
+    lastFontSize = fontSize;
+    eReaderBuildLineIndex();
+    currentLine = 0;
+    needsRefresh = true;
+  }
+  
   // Calculate pages
-  int totalPages = (totalLines + EREADER_LINES_PER_PAGE - 1) / EREADER_LINES_PER_PAGE;
-  int currentPage = (currentLine / EREADER_LINES_PER_PAGE) + 1;
+  int linesPerPage = eReaderGetLinesPerPage();
+  int lineHeight   = eReaderGetLineHeight();
+  int totalPages = (totalLines + linesPerPage - 1) / linesPerPage;
+  int currentPage = (currentLine / linesPerPage) + 1;
   
   // Calculate reading progress
   readingProgress = totalLines > 0 ? (currentLine * 100 / totalLines) : 0;
   
-  Serial.printf("[EREADER] Drawing page %d/%d (lines %d-%d of %d)\n", 
+  Serial.printf("[EREADER] Drawing page %d/%d (lines %d-%d of %d, font=%d)\n", 
                 currentPage, totalPages, currentLine, 
-                min(currentLine + EREADER_LINES_PER_PAGE, totalLines), totalLines);
+                min(currentLine + linesPerPage, totalLines), totalLines, fontSize);
   Serial.flush();
   
   // Clear screen before drawing
@@ -303,8 +336,8 @@ void eReaderDisplayPage() {
   
   // Draw text content
   Serial.println("[EREADER] Drawing text content...");
-  Serial.printf("[EREADER] totalLines=%d, currentLine=%d, LINES_PER_PAGE=%d\n", 
-                totalLines, currentLine, EREADER_LINES_PER_PAGE);
+  Serial.printf("[EREADER] totalLines=%d, currentLine=%d, linesPerPage=%d\n", 
+                totalLines, currentLine, linesPerPage);
   Serial.printf("[EREADER] Y range: %d to %d (max safe: %d)\n", 
                 EREADER_TOP_MARGIN, EREADER_MAX_Y, EREADER_MAX_Y);
   Serial.flush();
@@ -323,28 +356,28 @@ void eReaderDisplayPage() {
   int yPos = EREADER_TOP_MARGIN;
   int linesDisplayed = 0;
   
-  // Pre-allocate line buffer outside loop and zero it
-  char lineBuf[EREADER_CHARS_PER_LINE + 1];
+  // Buffer sized for the largest supported font (12px = up to 130 chars + null)
+  char lineBuf[131];
   memset(lineBuf, 0, sizeof(lineBuf));
   
   Serial.println("[EREADER] Drawing lines...");
   Serial.flush();
   
-  for (int i = 0; i < EREADER_LINES_PER_PAGE && (currentLine + i) < totalLines; i++) {
+  for (int i = 0; i < linesPerPage && (currentLine + i) < totalLines; i++) {
     // Check if yPos is within safe bounds (accounting for font height)
-    if (yPos + 16 > EREADER_MAX_Y) {
+    if (yPos + fontSize > EREADER_MAX_Y) {
       Serial.printf("[EREADER] WARNING: Line %d at y=%d would exceed bounds, stopping\n", currentLine + i, yPos);
       break;
     }
     
     // Get line directly into buffer (no String operations)
-    int lineLen = eReaderGetLineToBuffer(currentLine + i, lineBuf, EREADER_CHARS_PER_LINE + 1);
+    int lineLen = eReaderGetLineToBuffer(currentLine + i, lineBuf, sizeof(lineBuf));
     
     if (lineLen > 0) {
-      EPD_ShowString(EREADER_LEFT_MARGIN, yPos, lineBuf, 16, BLACK);
+      EPD_ShowString(EREADER_LEFT_MARGIN, yPos, lineBuf, fontSize, BLACK);
     }
     
-    yPos += EREADER_LINE_HEIGHT;
+    yPos += lineHeight;
     linesDisplayed++;
   }
   
@@ -612,6 +645,7 @@ bool eReaderLoadBook(const String& filename) {
   delay(100);
   
   eReaderBuildLineIndex();
+  lastFontSize = settingsGetFontSize();  // Record font size used to build this index
   
   Serial.printf("[EREADER] Book loaded successfully: %d lines\n", totalLines);
   Serial.printf("[EREADER] Final free heap: %d bytes\n", ESP.getFreeHeap());
@@ -646,9 +680,10 @@ bool eReaderLoadBook(const String& filename) {
 void eReaderScrollDown(int lines = 1) {
   using namespace EReaderNS;
   
+  int linesPerPage = eReaderGetLinesPerPage();
   currentLine += lines;
-  if (currentLine >= totalLines - EREADER_LINES_PER_PAGE) {
-    currentLine = max(0, totalLines - EREADER_LINES_PER_PAGE);
+  if (currentLine >= totalLines - linesPerPage) {
+    currentLine = max(0, totalLines - linesPerPage);
   }
   needsRefresh = true;
   
@@ -680,11 +715,11 @@ void eReaderScrollUp(int lines = 1) {
 }
 
 void eReaderPageDown() {
-  eReaderScrollDown(EREADER_LINES_PER_PAGE);
+  eReaderScrollDown(eReaderGetLinesPerPage());
 }
 
 void eReaderPageUp() {
-  eReaderScrollUp(EREADER_LINES_PER_PAGE);
+  eReaderScrollUp(eReaderGetLinesPerPage());
 }
 
 void eReaderGoToStart() {
@@ -696,7 +731,7 @@ void eReaderGoToStart() {
 
 void eReaderGoToEnd() {
   using namespace EReaderNS;
-  currentLine = max(0, totalLines - EREADER_LINES_PER_PAGE);
+  currentLine = max(0, totalLines - eReaderGetLinesPerPage());
   needsRefresh = true;
   setBookProgress(currentFilename, currentLine, totalLines, true);
 }
