@@ -4,6 +4,7 @@
 #include "EPD.h"
 #include "SD.h"
 #include "PersistentStorage.h"
+#include "ScrollList.h"
 #include <vector>
 
 // Forward declarations for settings
@@ -39,8 +40,10 @@ namespace EReaderNS {
   static bool inBrowser = true;
   static bool needsRefresh = true;
   static std::vector<String> bookList;
-  static int selectedBook = 0;
-  static int browserScrollOffset = 0;   // For scrolling long book lists
+  static ScrollListState bookBrowserList;
+
+  // Book browser: 10 items @ 20 px, y starts below header @ 38, footer @ 240
+  static const ScrollListConfig BOOK_LIST_CFG = { 10, 20, 38, 10, 770 };
   
   // Reading statistics
   static int readingProgress = 0;       // Percentage read (0-100)
@@ -407,36 +410,23 @@ void eReaderDisplayPage() {
 
 // ==================== FILE BROWSER ====================
 
-void eReaderDisplayBrowser() {
+// Load (or reload) the book list from the SD card into bookList.
+// Called from eReaderInit() so the display function just renders the cached list.
+void eReaderLoadBookList() {
   using namespace EReaderNS;
-  
-  Paint_Clear(WHITE);
-  
-  // Header
-  EPD_DrawLine(0, 0, 792, 0, BLACK);
-  EPD_DrawLine(0, 35, 792, 35, BLACK);
-  EPD_ShowString(EREADER_LEFT_MARGIN, 8, (char*)"E-READER - SELECT BOOK", 16, BLACK);
-  
-  // Check for books folder
+
+  bookList.clear();
+
   File dir = SD.open(booksPath);
   if (!dir) {
-    EPD_ShowString(EREADER_LEFT_MARGIN, 60, (char*)"ERROR: /books/ folder not found", 16, BLACK);
-    EPD_ShowString(EREADER_LEFT_MARGIN, 90, (char*)"Please create /books/ on SD card", 16, BLACK);
-    EPD_ShowString(EREADER_LEFT_MARGIN, 120, (char*)"Use Web Portal to upload books", 16, BLACK);
-    EPD_DrawLine(0, 240, 792, 240, BLACK);
-    EPD_ShowString(EREADER_LEFT_MARGIN, 248, (char*)"EXIT: Return to Home", 16, BLACK);
-    EPD_Display(ImageBW);
-    EPD_PartUpdate();
+    Serial.println("[EREADER] /books/ folder not found");
     return;
   }
-  
-  // Load book list
-  bookList.clear();
+
   File file = dir.openNextFile();
   while (file) {
     if (!file.isDirectory()) {
       String filename = String(file.name());
-      // Only show .txt files
       if (filename.endsWith(".txt") || filename.endsWith(".TXT")) {
         bookList.push_back(filename);
       }
@@ -445,81 +435,84 @@ void eReaderDisplayBrowser() {
     file = dir.openNextFile();
   }
   dir.close();
-  
-  // Sort book list alphabetically
+
   std::sort(bookList.begin(), bookList.end());
-  
+  Serial.printf("[EREADER] %d book(s) found\n", (int)bookList.size());
+}
+
+void eReaderDisplayBrowser() {
+  using namespace EReaderNS;
+
+  Paint_Clear(WHITE);
+
+  // ---- Header ----
+  EPD_DrawLine(0, 0, 792, 0, BLACK);
+  EPD_DrawLine(0, 35, 792, 35, BLACK);
+  EPD_ShowString(EREADER_LEFT_MARGIN, 8, (char*)"E-READER - SELECT BOOK", 16, BLACK);
+
+  char countStr[24];
+  snprintf(countStr, sizeof(countStr), "%d book(s)", (int)bookList.size());
+  EPD_ShowString(600, 8, countStr, 16, BLACK);
+
+  // ---- Footer ----
+  EPD_DrawLine(0, 240, 792, 240, BLACK);
+  EPD_ShowString(EREADER_LEFT_MARGIN, 248,
+                 (char*)"UP/DOWN: Navigate  OK: Open  EXIT: Home", 16, BLACK);
+
+  // ---- Empty state ----
   if (bookList.size() == 0) {
-    EPD_ShowString(EREADER_LEFT_MARGIN, 60, (char*)"No books found in /books/", 16, BLACK);
-    EPD_ShowString(EREADER_LEFT_MARGIN, 90, (char*)"Upload .txt files via Web Portal", 16, BLACK);
-    EPD_DrawLine(0, 240, 792, 240, BLACK);
-    EPD_ShowString(EREADER_LEFT_MARGIN, 248, (char*)"EXIT: Return to Home", 16, BLACK);
+    EPD_ShowString(200, 100, (char*)"No books found in /books/", 16, BLACK);
+    EPD_ShowString(180, 130, (char*)"Upload .txt files via Settings > Web Portal", 16, BLACK);
     EPD_Display(ImageBW);
     EPD_PartUpdate();
     return;
   }
-  
-  // Display books (with scrolling support)
-  int maxVisible = 11;  // Books visible at once
-  int startIdx = browserScrollOffset;
-  int yPos = 50;
-  
-  for (int i = 0; i < maxVisible && (startIdx + i) < bookList.size(); i++) {
-    int bookIdx = startIdx + i;
-    
-    // Highlight selected book
-    if (bookIdx == selectedBook) {
-      // Draw selection box
-      EPD_DrawRectangle(5, yPos - 2, 787, yPos + 16, BLACK, 0);
-      EPD_ShowString(EREADER_LEFT_MARGIN + 5, yPos, (char*)"> ", 16, BLACK);
+
+  // ---- Book list (ScrollList) ----
+  int itemCount = (int)bookList.size();
+  for (int i = 0; i < BOOK_LIST_CFG.visibleCount; i++) {
+    int idx = bookBrowserList.scrollOffset + i;
+    if (idx >= itemCount) break;
+
+    int yRow  = scrollListRowY (BOOK_LIST_CFG, i);
+    int yText = scrollListTextY(BOOK_LIST_CFG, i);
+
+    bool sel = (idx == bookBrowserList.selectedIdx);
+    if (sel) scrollListDrawSelection(BOOK_LIST_CFG, yRow);
+
+    // Filename — strip .txt extension for cleaner display
+    String displayName = bookList[idx];
+    if (displayName.endsWith(".txt") || displayName.endsWith(".TXT")) {
+      displayName = displayName.substring(0, displayName.length() - 4);
     }
-    
-    // Display filename (truncate if too long to leave room for progress)
-    String displayName = bookList[bookIdx];
-    
-    // Get saved progress for this book
-    int savedLine = 0;
-    int savedTotal = 0;
-    int savedPercent = 0;
-    bool hasProgress = getBookProgress(bookList[bookIdx], &savedLine, &savedTotal, &savedPercent);
-    
-    // Shorten filename to leave room for progress indicator
-    int maxNameLen = hasProgress ? 60 : 90;
-    if (displayName.length() > maxNameLen) {
-      displayName = displayName.substring(0, maxNameLen - 3) + "...";
+
+    // Look up saved reading progress
+    int savedLine = 0, savedTotal = 0, savedPercent = 0;
+    bool hasProgress = getBookProgress(bookList[idx], &savedLine, &savedTotal, &savedPercent);
+
+    // Truncate name to leave room for the progress badge (~6 chars at right)
+    int maxChars = hasProgress ? 62 : 75;
+    if ((int)displayName.length() > maxChars) {
+      displayName = displayName.substring(0, maxChars - 3) + "...";
     }
-    
-    EPD_ShowString(EREADER_LEFT_MARGIN + 25, yPos, (char*)displayName.c_str(), 16, BLACK);
-    
-    // Display progress if available
+
+    EPD_ShowString(BOOK_LIST_CFG.leftMargin + 16, yText,
+                   (char*)displayName.c_str(), 16, BLACK);
+
     if (hasProgress) {
-      char progressStr[30];
-      sprintf(progressStr, "[%d%%]", savedPercent);
-      EPD_ShowString(550, yPos, progressStr, 16, BLACK);
+      char badge[12];
+      snprintf(badge, sizeof(badge), "[%d%%]", savedPercent);
+      EPD_ShowString(680, yText, badge, 16, BLACK);
     }
-    
-    yPos += 18;
   }
-  
-  // Footer with instructions
-  EPD_DrawLine(0, 240, 792, 240, BLACK);
-  char footer[100];
-  sprintf(footer, "Books: %d | UP/DOWN: Select | OK: Open | EXIT: Home", bookList.size());
-  EPD_ShowString(EREADER_LEFT_MARGIN, 248, footer, 16, BLACK);
-  
-  // Scroll indicators
-  if (browserScrollOffset > 0) {
-    EPD_ShowString(750, 50, (char*)"^", 16, BLACK);
-  }
-  if (browserScrollOffset + maxVisible < bookList.size()) {
-    EPD_ShowString(750, 220, (char*)"v", 16, BLACK);
-  }
-  
+  scrollListDrawArrows(bookBrowserList, BOOK_LIST_CFG, itemCount);
+
   EPD_Display(ImageBW);
   EPD_PartUpdate();
-  
-  Serial.printf("[EREADER] Browser showing books %d-%d of %d\n", 
-                startIdx + 1, min(startIdx + maxVisible, (int)bookList.size()), bookList.size());
+
+  Serial.printf("[EREADER] Browser: %d/%d visible, selected=%d\n",
+                bookBrowserList.scrollOffset + 1,
+                itemCount, bookBrowserList.selectedIdx);
 }
 
 // ==================== FILE LOADING ====================
@@ -752,24 +745,27 @@ void eReaderInit() {
   currentFilename = "";
   booksPath = "/books/";
   bookList.clear();
-  
+
   inBrowser = true;
   needsRefresh = true;
-  selectedBook = 0;
-  browserScrollOffset = 0;
+  scrollListInit(bookBrowserList);
   currentLine = 0;
   totalLines = 0;
   lineStarts.clear();
-  
+
   if (fileBuffer != NULL) {
     free(fileBuffer);
     fileBuffer = NULL;
   }
   fileSize = 0;
-  
+
+  Serial.println("[EREADER] Loading book list...");
+  Serial.flush();
+  eReaderLoadBookList();
+
   Serial.println("[EREADER] Initializing display...");
   Serial.flush();
-  
+
   EPD_GPIOInit();
   Paint_NewImage(ImageBW, 800, 272, Rotation, WHITE);
   
@@ -800,48 +796,30 @@ void eReaderUpdate() {
 
 void eReaderHandleBrowserInput(bool upPressed, bool downPressed, bool okPressed, bool exitPressed) {
   using namespace EReaderNS;
-  
+
   if (upPressed) {
-    if (selectedBook > 0) {
-      selectedBook--;
-      
-      // Adjust scroll offset if needed
-      int maxVisible = 11;
-      if (selectedBook < browserScrollOffset) {
-        browserScrollOffset = selectedBook;
-      }
-      
-      needsRefresh = true;
-    }
+    scrollListUp(bookBrowserList, BOOK_LIST_CFG, (int)bookList.size());
+    needsRefresh = true;
   }
-  
+
   if (downPressed) {
-    if (selectedBook < bookList.size() - 1) {
-      selectedBook++;
-      
-      // Adjust scroll offset if needed
-      int maxVisible = 11;
-      if (selectedBook >= browserScrollOffset + maxVisible) {
-        browserScrollOffset = selectedBook - maxVisible + 1;
-      }
-      
-      needsRefresh = true;
-    }
+    scrollListDown(bookBrowserList, BOOK_LIST_CFG, (int)bookList.size());
+    needsRefresh = true;
   }
-  
+
   if (okPressed && bookList.size() > 0) {
     Serial.println("[EREADER] OK pressed - loading book...");
     Serial.flush();
     delay(100);
-    
-    if (eReaderLoadBook(bookList[selectedBook])) {
+
+    if (eReaderLoadBook(bookList[bookBrowserList.selectedIdx])) {
       Serial.println("[EREADER] Book loaded, switching to reader view...");
       Serial.flush();
       delay(100);
-      
+
       inBrowser = false;
       needsRefresh = true;
-      
+
       Serial.println("[EREADER] Switched to reader mode");
       Serial.flush();
     } else {
@@ -849,9 +827,9 @@ void eReaderHandleBrowserInput(bool upPressed, bool downPressed, bool okPressed,
       Serial.flush();
     }
   }
-  
+
   if (exitPressed) {
-    // Signal to exit E-Reader mode
+    // Signal to exit E-Reader mode (handled by OS_Main)
   }
 }
 

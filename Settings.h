@@ -5,6 +5,7 @@
 #include "SD.h"
 #include "PersistentStorage.h"
 #include "Battery.h"
+#include "ScrollList.h"
 #include <vector>
 
 // ==================== SETTINGS CONFIGURATION ====================
@@ -108,8 +109,8 @@ namespace SettingsNS {
   
   // File management
   static std::vector<String> fileList;
-  static int selectedFile = 0;
-  static int fileScrollOffset = 0;
+  static ScrollListState fileListState;   // replaces selectedFile + fileScrollOffset
+  static const ScrollListConfig FILE_LIST_CFG = { 8, 22, 45, 15, 787 };
   static String currentPath = "";
   static bool confirmDelete = false;
   static String fileToDelete = "";
@@ -273,8 +274,7 @@ void scanDirectory(const String& path) {
   
   Serial.printf("[SETTINGS] Scanning directory: %s\n", path.c_str());
   fileList.clear();
-  selectedFile = 0;
-  fileScrollOffset = 0;
+  scrollListInit(fileListState);
   currentPath = path;
   
   if (!SD.exists(path)) {
@@ -413,54 +413,43 @@ void settingsDrawMainMenu() {
 
 void settingsDrawFileList(const char* title) {
   using namespace SettingsNS;
-  
+
   Paint_Clear(WHITE);
   settingsDrawHeader(title);
-  
+
   if (fileList.size() == 0) {
     EPD_ShowString(250, 100, "No files found", 16, BLACK);
     settingsDrawFooter("EXIT: Back");
   } else {
-    // Draw file list
-    int startY = 45;
-    int itemHeight = 22;
-    int maxVisible = 8;
-    
-    // Adjust scroll offset
-    if (selectedFile < fileScrollOffset) {
-      fileScrollOffset = selectedFile;
-    }
-    if (selectedFile >= fileScrollOffset + maxVisible) {
-      fileScrollOffset = selectedFile - maxVisible + 1;
-    }
-    
-    for (int i = 0; i < maxVisible && (i + fileScrollOffset) < fileList.size(); i++) {
-      int fileIndex = i + fileScrollOffset;
-      int yPos = startY + (i * itemHeight);
-      
-      String displayName = fileList[fileIndex];
-      if (displayName.length() > 60) {
-        displayName = displayName.substring(0, 57) + "...";
+    int itemCount = (int)fileList.size();
+
+    // Show count in header
+    char countStr[16];
+    snprintf(countStr, sizeof(countStr), "%d file(s)", itemCount);
+    EPD_ShowString(600, 7, countStr, 16, BLACK);
+
+    for (int i = 0; i < FILE_LIST_CFG.visibleCount; i++) {
+      int idx = fileListState.scrollOffset + i;
+      if (idx >= itemCount) break;
+
+      int yRow  = scrollListRowY (FILE_LIST_CFG, i);
+      int yText = scrollListTextY(FILE_LIST_CFG, i);
+
+      bool sel = (idx == fileListState.selectedIdx);
+      if (sel) scrollListDrawSelection(FILE_LIST_CFG, yRow);
+
+      String displayName = fileList[idx];
+      if ((int)displayName.length() > 72) {
+        displayName = displayName.substring(0, 69) + "...";
       }
-      
-      if (fileIndex == selectedFile) {
-        EPD_DrawRectangle(5, yPos - 2, 787, yPos + itemHeight - 6, BLACK, 1);
-        EPD_ShowString(15, yPos, (char*)displayName.c_str(), 16, WHITE);
-      } else {
-        EPD_ShowString(15, yPos, (char*)displayName.c_str(), 16, BLACK);
-      }
+      EPD_ShowString(FILE_LIST_CFG.leftMargin + 16, yText,
+                     (char*)displayName.c_str(), 16, BLACK);
     }
-    
-    // Draw scroll indicator
-    if (fileList.size() > maxVisible) {
-      char scrollText[32];
-      sprintf(scrollText, "%d/%d", selectedFile + 1, (int)fileList.size());
-      EPD_ShowString(700, 10, scrollText, 16, BLACK);
-    }
-    
+    scrollListDrawArrows(fileListState, FILE_LIST_CFG, itemCount);
+
     settingsDrawFooter("UP/DOWN: Navigate  OK: Delete  EXIT: Back");
   }
-  
+
   EPD_Display(ImageBW);
   EPD_PartUpdate();
   needsRefresh = false;
@@ -1021,24 +1010,23 @@ void settingsHandleMainMenuInput(bool upPressed, bool downPressed, bool okPresse
 
 void settingsHandleFileListInput(bool upPressed, bool downPressed, bool okPressed) {
   using namespace SettingsNS;
-  
+
   if (fileList.size() == 0) return;
-  
+  int itemCount = (int)fileList.size();
+
   if (upPressed) {
-    selectedFile--;
-    if (selectedFile < 0) selectedFile = fileList.size() - 1;
+    scrollListUp(fileListState, FILE_LIST_CFG, itemCount);
     needsRefresh = true;
   }
-  
+
   if (downPressed) {
-    selectedFile++;
-    if (selectedFile >= fileList.size()) selectedFile = 0;
+    scrollListDown(fileListState, FILE_LIST_CFG, itemCount);
     needsRefresh = true;
   }
-  
-  if (okPressed && selectedFile >= 0 && selectedFile < fileList.size()) {
-    // Show delete confirmation
-    fileToDelete = fileList[selectedFile];
+
+  if (okPressed && fileListState.selectedIdx >= 0 &&
+      fileListState.selectedIdx < itemCount) {
+    fileToDelete = fileList[fileListState.selectedIdx];
     confirmDelete = true;
     needsRefresh = true;
   }
@@ -1566,8 +1554,7 @@ void settingsCleanup() {
   saveSettings();
   
   fileList.clear();
-  selectedFile = 0;
-  fileScrollOffset = 0;
+  scrollListInit(fileListState);
   currentPath = "";
 }
 

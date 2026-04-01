@@ -10,8 +10,8 @@
 #include "Settings.h"
 #include "Kittalien.h"
 #include "Battery.h"
-#include "HttpReader.h"
 #include "SmartDashboard.h"
+#include "ScrollList.h"
 #include "DailyProgress.h"
 
 // ==================== PIN DEFINITIONS ====================
@@ -45,7 +45,6 @@ ButtonManager* buttons = nullptr;
 enum SystemMode {
   MODE_HOME,
   MODE_EREADER,
-  MODE_HTTPREADER,
   MODE_DASHBOARD,
   MODE_ARTFRAME,
   MODE_WEBPORTAL,
@@ -55,19 +54,24 @@ enum SystemMode {
 };
 
 SystemMode currentMode = MODE_HOME;
-int selectedMenuItem = 0;
-int homeScrollOffset = 0;   // index of first visible menu item
+ScrollListState homeList = {0, 0};  // home screen navigation state
 bool needsRedraw = true;
 
 // ==================== HOME MENU DISPLAY CONFIG ====================
 #define HOME_ITEMS_VISIBLE 6   // number of menu rows shown at once
 #define HOME_ITEM_HEIGHT   32  // pixels per row
 
+static const ScrollListConfig HOME_LIST_CFG = {
+  HOME_ITEMS_VISIBLE, HOME_ITEM_HEIGHT,
+  35,   // startY  (below header line)
+  12,   // leftMargin  (">")  — item text at leftMargin+16 = 28
+  787   // rightEdge
+};
+
 // ==================== MODE MENU ====================
-const int NUM_MODES = 9;
+const int NUM_MODES = 8;
 const char* modeNames[] = {
   "E-Reader",
-  "HTTP Reader",
   "Smart Dashboard",
   "Art Frame",
   "Web Portal",
@@ -79,7 +83,6 @@ const char* modeNames[] = {
 
 const char* modeDescriptions[] = {
   "Read books from SD card",
-  "Fetch articles from the web",
   "Weather, time, news",
   "Random art display",
   "File upload via WiFi",
@@ -99,9 +102,6 @@ void returnToHome();
 
 // E-Reader mode functions
 void runEReaderMode();
-
-// HTTP Reader mode
-void runHttpReaderMode();
 
 // Other mode stubs
 void runDashboardMode();
@@ -144,9 +144,8 @@ void setup() {
   initializePersistentStorage();
   loadSettings();
   
-  // Attempt a background NTP time-sync if WiFi STA is configured.
-  // Non-blocking on failure – the clock just shows "--:--" until synced.
-  dashBackgroundTimeSync();
+  // Time sync happens on demand inside Smart Dashboard mode.
+  // No background WiFi activity at boot keeps battery life optimal.
 
   currentMode = MODE_HOME;
   needsRedraw = true;
@@ -183,10 +182,6 @@ void loop() {
       runEReaderMode();
       break;
 
-    case MODE_HTTPREADER:
-      runHttpReaderMode();
-      break;
-      
     case MODE_DASHBOARD:
       runDashboardMode();
       break;
@@ -271,35 +266,25 @@ void displayHomeScreen() {
   EPD_ShowString(700, 5, batteryStr, 16, BLACK);
   
   // Menu items — scrolling window
-  int startY = 35;
-
-  for (int i = 0; i < HOME_ITEMS_VISIBLE; i++) {
-    int modeIdx = homeScrollOffset + i;
+  for (int i = 0; i < HOME_LIST_CFG.visibleCount; i++) {
+    int modeIdx = homeList.scrollOffset + i;
     if (modeIdx >= NUM_MODES) break;
 
-    int yPos = startY + (i * HOME_ITEM_HEIGHT);
-    int textY = yPos + (HOME_ITEM_HEIGHT - 16) / 2;  // vertically centre 16-px text
+    int yRow  = scrollListRowY (HOME_LIST_CFG, i);
+    int yText = scrollListTextY(HOME_LIST_CFG, i);
 
-    // Selection indicator
-    if (modeIdx == selectedMenuItem) {
-      EPD_DrawRectangle(5, yPos, 787, yPos + HOME_ITEM_HEIGHT - 1, BLACK, 0);
-      EPD_ShowString(12, textY, (char*)">", 16, BLACK);
+    if (modeIdx == homeList.selectedIdx) {
+      scrollListDrawSelection(HOME_LIST_CFG, yRow);
     }
 
     // Mode name
-    EPD_ShowString(28, textY, (char*)modeNames[modeIdx], 16, BLACK);
+    EPD_ShowString(HOME_LIST_CFG.leftMargin + 16, yText, (char*)modeNames[modeIdx], 16, BLACK);
 
     // Mode description
-    EPD_ShowString(250, textY, (char*)modeDescriptions[modeIdx], 16, BLACK);
+    EPD_ShowString(250, yText, (char*)modeDescriptions[modeIdx], 16, BLACK);
   }
 
-  // Scroll arrows
-  if (homeScrollOffset > 0) {
-    EPD_ShowString(774, 36, (char*)"^", 16, BLACK);
-  }
-  if (homeScrollOffset + HOME_ITEMS_VISIBLE < NUM_MODES) {
-    EPD_ShowString(774, startY + HOME_ITEMS_VISIBLE * HOME_ITEM_HEIGHT - 20, (char*)"v", 16, BLACK);
-  }
+  scrollListDrawArrows(homeList, HOME_LIST_CFG, NUM_MODES);
 
   // Footer instructions
   EPD_DrawLine(0, 245, 792, 245, BLACK);
@@ -315,33 +300,21 @@ void displayHomeScreen() {
 void handleHomeNavigation() {
   // Navigate down
   if (buttons->next()->wasPressed()) {
-    selectedMenuItem++;
-    if (selectedMenuItem >= NUM_MODES) {
-      selectedMenuItem = 0;
-      homeScrollOffset = 0;  // wrap to top
-    } else if (selectedMenuItem >= homeScrollOffset + HOME_ITEMS_VISIBLE) {
-      homeScrollOffset = selectedMenuItem - HOME_ITEMS_VISIBLE + 1;
-    }
+    scrollListDown(homeList, HOME_LIST_CFG, NUM_MODES);
     needsRedraw = true;
-    Serial.printf("[HOME] Selected: %s\n", modeNames[selectedMenuItem]);
+    Serial.printf("[HOME] Selected: %s\n", modeNames[homeList.selectedIdx]);
   }
 
   // Navigate up
   else if (buttons->prv()->wasPressed()) {
-    selectedMenuItem--;
-    if (selectedMenuItem < 0) {
-      selectedMenuItem = NUM_MODES - 1;
-      homeScrollOffset = max(0, NUM_MODES - HOME_ITEMS_VISIBLE);  // wrap to bottom
-    } else if (selectedMenuItem < homeScrollOffset) {
-      homeScrollOffset = selectedMenuItem;
-    }
+    scrollListUp(homeList, HOME_LIST_CFG, NUM_MODES);
     needsRedraw = true;
-    Serial.printf("[HOME] Selected: %s\n", modeNames[selectedMenuItem]);
+    Serial.printf("[HOME] Selected: %s\n", modeNames[homeList.selectedIdx]);
   }
 
   // Select / Launch mode
   else if (buttons->ok()->wasPressed()) {
-    launchMode(selectedMenuItem);
+    launchMode(homeList.selectedIdx);
   }
 
   // Refresh home screen
@@ -360,41 +333,36 @@ void launchMode(int modeIndex) {
       eReaderInit();
       break;
 
-    case 1: // HTTP Reader
-      currentMode = MODE_HTTPREADER;
-      httpReaderInit();
-      break;
-      
-    case 2: // Smart Dashboard
+    case 1: // Smart Dashboard
       currentMode = MODE_DASHBOARD;
       dashboardInit();
       break;
-      
-    case 3: // Art Frame
+
+    case 2: // Art Frame
       currentMode = MODE_ARTFRAME;
       artFrameInit();
       break;
-      
-    case 4: // Web Portal
+
+    case 3: // Web Portal
       currentMode = MODE_WEBPORTAL;
       break;
-      
-    case 5: // Kittalien Pet
+
+    case 4: // Kittalien Pet
       currentMode = MODE_KITTALIEN;
       kittalienInit();
       break;
-      
-    case 6: // Settings
+
+    case 5: // Settings
       currentMode = MODE_SETTINGS;
       settingsInit();
       break;
 
-    case 7: // Daily Progress
+    case 6: // Daily Progress
       currentMode = MODE_PROGRESS;
       progressInit();
       break;
 
-    case 8: // Sleep
+    case 7: // Sleep
       enterDeepSleep();
       break;
   }
@@ -479,36 +447,6 @@ void runEReaderMode() {
       eReaderCleanup();
       returnToHome();
     }
-  }
-}
-
-// ==================== HTTP READER MODE ====================
-void runHttpReaderMode() {
-  httpReaderUpdate();
-  delay(20);
-
-  bool upPressed   = buttons->prv()->wasPressed();
-  bool downPressed = buttons->next()->wasPressed();
-  bool okPressed   = buttons->ok()->wasPressed();
-  bool exitPressed = buttons->exit()->wasPressed();
-  bool homePressed = buttons->home()->wasPressed();
-
-  // homePressed always returns to the OS home screen
-  if (homePressed) {
-    Serial.println("[OS] Exiting HTTP Reader to home...");
-    httpReaderCleanup();
-    returnToHome();
-    return;
-  }
-
-  // httpReaderHandleInput returns false when EXIT is pressed from the
-  // top-level URL-select menu, meaning we should leave the mode.
-  bool stayInMode = httpReaderHandleInput(upPressed, downPressed,
-                                          okPressed, exitPressed);
-  if (!stayInMode) {
-    Serial.println("[OS] HTTP Reader requested exit to home");
-    httpReaderCleanup();
-    returnToHome();
   }
 }
 
